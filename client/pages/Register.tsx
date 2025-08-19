@@ -13,18 +13,41 @@ import { ArrowLeft, Eye, EyeOff, Zap } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+// Mock function to simulate Agent X Wallet address generation
+const generateAgentXWalletAddress = () => {
+  // In a real implementation, this would call the Agent X Wallet API
+  // For now, generate a random 32-character hex string as a mock wallet address
+  const characters = "0123456789abcdef";
+  let walletAddress = "0x";
+  for (let i = 0; i < 40; i++) {
+    walletAddress += characters.charAt(
+      Math.floor(Math.random() * characters.length),
+    );
+  }
+  return walletAddress;
+};
+
 export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     phone: "",
     otp: "",
     password: "",
+    walletAddress: "", // Added walletAddress to formData
   });
   const navigate = useNavigate();
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, you'd validate and submit the form
+    // Generate wallet address during registration
+    const newWalletAddress = generateAgentXWalletAddress();
+    setFormData((prev) => ({ ...prev, walletAddress: newWalletAddress }));
+
+    // In a real app, you'd validate and submit the form with wallet address
+    console.log("Registration data:", {
+      ...formData,
+      walletAddress: newWalletAddress,
+    });
     navigate("/home");
   };
 
@@ -66,7 +89,7 @@ export default function Register() {
                   <Input
                     id="phone"
                     type="tel"
-                    placeholder="Enter your phone number to registergit "
+                    placeholder="Enter your phone number"
                     value={formData.phone}
                     onChange={(e) => handleInputChange("phone", e.target.value)}
                     required
@@ -79,7 +102,7 @@ export default function Register() {
                     <Input
                       id="otp"
                       type={showPassword ? "text" : "password"}
-                      placeholder="Create a strong password"
+                      placeholder="Enter your OTP"
                       value={formData.otp}
                       onChange={(e) => handleInputChange("otp", e.target.value)}
                       required

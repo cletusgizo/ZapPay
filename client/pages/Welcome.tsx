@@ -1,5 +1,11 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ArrowRight, Smartphone, Shield, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -75,17 +81,15 @@ export default function Welcome() {
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Link>
             </Button>
-            
+
             <Button variant="outline" asChild className="w-full h-12 text-base">
-              <Link to="/login">
-                Sign In
-              </Link>
+              <Link to="/login">Sign In</Link>
             </Button>
           </div>
 
           {/* Trust Indicators */}
           <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-            <p>Trusted by 10,000+ Nigerian businesses</p>
+            <p>Copyright @ ZapPay</p>
           </div>
         </div>
       </main>

@@ -15,7 +15,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
 
@@ -43,7 +43,7 @@ export default function Login() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 px-6 pb-8 sm:text-inherit text-blue-500">
+      <main className="flex-1 px-6 pb-8">
         <div className="max-w-md mx-auto">
           <Card className="border-none shadow-lg">
             <CardHeader className="text-center pb-4">
@@ -53,13 +53,13 @@ export default function Login() {
             <CardContent className="space-y-6">
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email">Phone</Label>
+                  <Label htmlFor="phone">Phone Number</Label>
                   <Input
-                    id="email"
-                    type="email"
-                    placeholder="Enter your phone"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    id="phone"
+                    type="tel"
+                    placeholder="Enter your phone number"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
                     required
                   />
                 </div>

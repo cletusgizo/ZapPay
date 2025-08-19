@@ -21,8 +21,13 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@starknet-io/get-starknet": "^4.0.7",
+    "@starknet-io/get-starknet-core": "^4.0.7",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "get-starknet": "^4.0.0",
+    "starknet": "^7.6.4",
+    "starknetkit": "^3.0.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {

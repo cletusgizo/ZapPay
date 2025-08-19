@@ -1,16 +1,23 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import BottomNav from "@/components/BottomNav";
-import { 
-  QrCode, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  Eye, 
+import {
+  QrCode,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Eye,
   EyeOff,
   Bell,
   TrendingUp,
-  Zap
+  Zap,
+  Copy,
 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -23,7 +30,7 @@ const recentTransactions = [
     nairaAmount: "₦850,000",
     status: "settled",
     time: "2 minutes ago",
-    sender: "0x742d...5A1f"
+    sender: "0x742d...5A1f",
   },
   {
     id: "2",
@@ -32,7 +39,7 @@ const recentTransactions = [
     nairaAmount: "₦75,000",
     status: "pending",
     time: "1 hour ago",
-    recipient: "0x456A...8B2c"
+    recipient: "0x456A...8B2c",
   },
   {
     id: "3",
@@ -41,12 +48,21 @@ const recentTransactions = [
     nairaAmount: "₦120,000",
     status: "settled",
     time: "3 hours ago",
-    sender: "0x789C...4D3e"
-  }
+    sender: "0x789C...4D3e",
+  },
 ];
+
+// Mock wallet address (in a real app, this would come from user context or API)
+const walletAddress = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
 
 export default function Home() {
   const [balanceVisible, setBalanceVisible] = useState(true);
+
+  const handleCopyAddress = () => {
+    navigator.clipboard.writeText(walletAddress);
+    // In a real app, you might show a toast notification here
+    console.log("Wallet address copied:", walletAddress);
+  };
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -59,7 +75,11 @@ export default function Home() {
             </div>
             <span className="text-lg font-semibold">ZapPay</span>
           </div>
-          <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-white hover:bg-white/20"
+          >
             <Bell className="w-5 h-5" />
           </Button>
         </div>
@@ -85,9 +105,23 @@ export default function Home() {
               )}
             </Button>
           </div>
-          <div className="flex items-center justify-center gap-1 text-sm opacity-90">
+          <div className="flex items-center justify-center gap-1 text-sm opacity-90 mb-4">
             <TrendingUp className="w-4 h-4" />
             <span>+12.5% this week</span>
+          </div>
+          {/* Wallet Address Display */}
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-sm opacity-90">
+              Wallet: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+            </p>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-white hover:bg-white/20 h-8 w-8"
+              onClick={handleCopyAddress}
+            >
+              <Copy className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       </header>
@@ -127,7 +161,8 @@ export default function Home() {
                   Payment Received!
                 </p>
                 <p className="text-sm text-green-600 dark:text-green-400">
-                  0.5 ETH (₦850,000) automatically converted and transferred to your bank.
+                  0.5 ETH (₦850,000) automatically converted and transferred to
+                  your bank.
                 </p>
                 <p className="text-xs text-green-500 dark:text-green-500 mt-1">
                   2 minutes ago
@@ -152,36 +187,47 @@ export default function Home() {
             <Card key={tx.id} className="border-none shadow-sm">
               <CardContent className="p-4">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    tx.type === "received" 
-                      ? "bg-green-100 dark:bg-green-900" 
-                      : "bg-orange-100 dark:bg-orange-900"
-                  }`}>
+                  <div
+                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      tx.type === "received"
+                        ? "bg-green-100 dark:bg-green-900"
+                        : "bg-orange-100 dark:bg-orange-900"
+                    }`}
+                  >
                     {tx.type === "received" ? (
                       <ArrowDownLeft className="w-5 h-5 text-green-600" />
                     ) : (
                       <ArrowUpRight className="w-5 h-5 text-orange-600" />
                     )}
                   </div>
-                  
+
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="font-medium">
-                          {tx.type === "received" ? "Received" : "Sent"} {tx.amount}
+                          {tx.type === "received" ? "Received" : "Sent"}{" "}
+                          {tx.amount}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {tx.type === "received" ? `From ${tx.sender}` : `To ${tx.recipient}`}
+                          {tx.type === "received"
+                            ? `From ${tx.sender}`
+                            : `To ${tx.recipient}`}
                         </p>
                       </div>
                       <div className="text-right">
                         <p className="font-semibold">{tx.nairaAmount}</p>
-                        <Badge variant={tx.status === "settled" ? "default" : "secondary"}>
+                        <Badge
+                          variant={
+                            tx.status === "settled" ? "default" : "secondary"
+                          }
+                        >
                           {tx.status}
                         </Badge>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">{tx.time}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {tx.time}
+                    </p>
                   </div>
                 </div>
               </CardContent>

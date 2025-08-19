@@ -19,6 +19,10 @@ import History from "./pages/History";
 import Profile from "./pages/Profile";
 import About from "./pages/About";
 import NotFound from "./pages/NotFound";
+// // App.tsx or your main app component
+// import React from "react";
+// import { BraavosProvider } from "./BraavosProvider";
+// import Payments from "./Payments";
 
 const queryClient = new QueryClient();
 
@@ -49,5 +53,18 @@ const App = () => (
     </ThemeProvider>
   </QueryClientProvider>
 );
+
+// function App() {
+//   return (
+//     <BraavosProvider>
+//       <div className="App">
+//         <Payments />
+//         {/* Other components */}
+//       </div>
+//     </BraavosProvider>
+//   );
+// }
+
+export default App;
 
 createRoot(document.getElementById("root")!).render(<App />);
