@@ -14,31 +14,83 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getUserId, generateStarknetAddress, snKeys } from "@/lib/session";
 
+const BASE_URL = "https://zappay-global.onrender.com";
+
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, you'd validate credentials here
+    setIsLoggingIn(true);
+    setError("");
 
-    // Generate a new wallet address for this user
     try {
-      const userId = getUserId();
-      const walletData = await generateStarknetAddress();
+      // Call backend API to login user
+      const response = await fetch(`${BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          phone: phone,
+          password: password,
+        }),
+      });
 
-      // Store the wallet address with user-specific key
-      localStorage.setItem(snKeys.address(userId), walletData.address);
+      const result = await response.json();
 
-      console.log("Generated new wallet address for user:", walletData.address);
+      if (response.ok && result.success) {
+        // Store user data and tokens in localStorage
+        if (result.user && result.user.id) {
+          localStorage.setItem("userId", result.user.id);
+        }
+
+        if (result.accessToken) {
+          localStorage.setItem("accessToken", result.accessToken);
+        }
+
+        if (result.refreshToken) {
+          localStorage.setItem("refreshToken", result.refreshToken);
+        }
+
+        // Store user info
+        if (result.user) {
+          localStorage.setItem("userInfo", JSON.stringify(result.user));
+        }
+
+        // Generate a new wallet address for this user
+        try {
+          const userId = result.user.id;
+          const walletData = await generateStarknetAddress();
+
+          // Store the wallet address with user-specific key
+          localStorage.setItem(snKeys.address(userId), walletData.address);
+
+          console.log(
+            "Generated new wallet address for user:",
+            walletData.address,
+          );
+        } catch (error) {
+          console.error("Failed to generate wallet address:", error);
+          // Continue with login even if wallet generation fails
+        }
+
+        // Navigate to home
+        navigate("/home");
+      } else {
+        throw new Error(result.message || "Login failed");
+      }
     } catch (error) {
-      console.error("Failed to generate wallet address:", error);
-      // Continue with login even if wallet generation fails
+      console.error("Login error:", error);
+      setError(error instanceof Error ? error.message : "Login failed");
+    } finally {
+      setIsLoggingIn(false);
     }
-
-    navigate("/home");
   };
 
   return (
@@ -67,6 +119,12 @@ export default function Login() {
               <CardDescription>Sign in to your ZapPay account</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {error && (
+                <div className="p-3 rounded-md bg-red-50 border border-red-200">
+                  <p className="text-red-600 text-sm">{error}</p>
+                </div>
+              )}
+
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number</Label>
@@ -107,8 +165,12 @@ export default function Login() {
                   </div>
                 </div>
 
-                <Button type="submit" className="w-full h-12">
-                  Sign In
+                <Button
+                  type="submit"
+                  className="w-full h-12"
+                  disabled={!phone || !password || isLoggingIn}
+                >
+                  {isLoggingIn ? "Signing In..." : "Sign In"}
                 </Button>
               </form>
 
