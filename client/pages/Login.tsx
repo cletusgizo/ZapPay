@@ -23,21 +23,21 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     // In a real app, you'd validate credentials here
-    
+
     // Generate a new wallet address for this user
     try {
       const userId = getUserId();
       const walletData = await generateStarknetAddress();
-      
+
       // Store the wallet address with user-specific key
       localStorage.setItem(snKeys.address(userId), walletData.address);
-      
+
       console.log("Generated new wallet address for user:", walletData.address);
     } catch (error) {
       console.error("Failed to generate wallet address:", error);
       // Continue with login even if wallet generation fails
     }
-    
+
     navigate("/home");
   };
 
