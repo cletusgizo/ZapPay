@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, Eye, EyeOff, Zap } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { getUserId, generateStarknetAddress, snKeys } from "@/lib/session";
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
@@ -19,9 +20,24 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     // In a real app, you'd validate credentials here
+    
+    // Generate a new wallet address for this user
+    try {
+      const userId = getUserId();
+      const walletData = await generateStarknetAddress();
+      
+      // Store the wallet address with user-specific key
+      localStorage.setItem(snKeys.address(userId), walletData.address);
+      
+      console.log("Generated new wallet address for user:", walletData.address);
+    } catch (error) {
+      console.error("Failed to generate wallet address:", error);
+      // Continue with login even if wallet generation fails
+    }
+    
     navigate("/home");
   };
 
