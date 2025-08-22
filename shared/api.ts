@@ -10,3 +10,23 @@
 export interface DemoResponse {
   message: string;
 }
+
+/**
+ * Registration request type for /api/register
+ */
+export interface RegisterRequest {
+  phone: string;
+  otp: string;
+  password: string;
+  walletAddress: string;
+}
+
+/**
+ * Registration response type for /api/register
+ */
+export interface RegisterResponse {
+  success: boolean;
+  message: string;
+  userId?: string;
+  token?: string;
+}
