@@ -1,5 +1,7 @@
 import { DemoResponse } from "@shared/api";
 import { useEffect, useState } from "react";
+import SwapButton from "/home/gizzo/Documents/ZapPay/client/components/ui/SwapButton";
+
 
 export default function Index() {
   const [exampleFromServer, setExampleFromServer] = useState("");
@@ -7,6 +9,8 @@ export default function Index() {
   useEffect(() => {
     fetchDemo();
   }, []);
+
+
 
   // Example of how to fetch data from the server (if needed)
   const fetchDemo = async () => {
@@ -18,6 +22,10 @@ export default function Index() {
       console.error("Error fetching hello:", error);
     }
   };
+
+  
+
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">

@@ -1,22 +1,67 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import BottomNav from "@/components/BottomNav";
-import { 
-  ArrowLeft, 
-  ArrowUpRight, 
+import {
+  ArrowLeft,
+  ArrowUpRight,
   ArrowDownLeft,
   TrendingUp,
   TrendingDown,
   Wallet as WalletIcon,
   Eye,
   EyeOff,
-  MoreHorizontal
+  MoreHorizontal,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 
-const portfolioData = [
+// --- ADD: StarkNet mainnet provider + helpers (Wallet.tsx) ---
+import { RpcProvider, CallData, num } from "starknet";
+import { getUserId, snKeys } from "@/lib/session";
+
+// mainnet provider (Blast or your existing one)
+const STARKNET_MAINNET_RPC = "https://starknet-mainnet.public.blastapi.io/";
+const provider = new RpcProvider({ nodeUrl: STARKNET_MAINNET_RPC });
+
+// STRK and ETH token contracts on Starknet mainnet (ERC20)
+const STRK_CONTRACT =
+  "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+const ETH_CONTRACT =
+  "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7";
+
+// generic ERC20 balance reader
+async function getErc20Balance(
+  contractAddress: string,
+  owner: string,
+): Promise<bigint> {
+  const res = await provider.callContract({
+    contractAddress,
+    entrypoint: "balanceOf",
+    calldata: CallData.compile({ user: owner }),
+  });
+
+  const low = num.toBigInt(res[0]);
+  const high = num.toBigInt(res[1]);
+  return high * BigInt(2) ** BigInt(128) + low;
+}
+
+function loadPersistedWalletAddress(): string | null {
+  try {
+    const userId = getUserId();
+    return localStorage.getItem(snKeys.address(userId));
+  } catch {
+    return null;
+  }
+}
+
+const portfolioTemplate = [
   {
     id: "eth",
     name: "Ethereum",
@@ -26,18 +71,18 @@ const portfolioData = [
     usdValue: "$1,234.56",
     change24h: "+5.2%",
     isPositive: true,
-    icon: "🔷"
+    icon: "🔷",
   },
   {
     id: "strk",
     name: "StarkNet",
-    symbol: "STRK", 
+    symbol: "STRK",
     amount: "15,000",
     nairaValue: "₦900,000",
     usdValue: "$600.00",
     change24h: "-2.1%",
     isPositive: false,
-    icon: "⭐"
+    icon: "⭐",
   },
   {
     id: "usdc",
@@ -48,7 +93,7 @@ const portfolioData = [
     usdValue: "$500.00",
     change24h: "+0.1%",
     isPositive: true,
-    icon: "💵"
+    icon: "💵",
   },
   {
     id: "btc",
@@ -59,16 +104,48 @@ const portfolioData = [
     usdValue: "$520.00",
     change24h: "+3.8%",
     isPositive: true,
-    icon: "₿"
-  }
+    icon: "₿",
+  },
 ];
 
 export default function Wallet() {
   const [balanceVisible, setBalanceVisible] = useState(true);
-  
-  const totalNairaValue = portfolioData.reduce((sum, asset) => {
-    return sum + parseFloat(asset.nairaValue.replace(/[₦,]/g, ''));
+  const [starknetAddress, setStarknetAddress] = useState<string | null>(null);
+  const [isFetchingStrk, setIsFetchingStrk] = useState(false);
+  const [strkBalance, setStrkBalance] = useState<bigint | null>(null);
+  const [strkError, setStrkError] = useState<string | null>(null);
+
+  const totalNairaValue = portfolioTemplate.reduce((sum, asset) => {
+    return sum + parseFloat(asset.nairaValue.replace(/[₦,]/g, ""));
   }, 0);
+
+  // Load wallet address on component mount
+  useEffect(() => {
+    const address = loadPersistedWalletAddress();
+    setStarknetAddress(address);
+    
+    // If we have an address, fetch the STRK balance
+    if (address) {
+      fetchStrkBalance(address);
+    }
+  }, []);
+
+  // Fetch STRK balance
+  const fetchStrkBalance = async (address: string) => {
+    setIsFetchingStrk(true);
+    setStrkError(null);
+    
+    try {
+      const balance = await getErc20Balance(STRK_CONTRACT, address);
+      setStrkBalance(balance);
+    } catch (error) {
+      console.error("Error fetching STRK balance:", error);
+      setStrkError("Failed to fetch balance");
+      setStrkBalance(null);
+    } finally {
+      setIsFetchingStrk(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -113,12 +190,16 @@ export default function Wallet() {
                   )}
                 </Button>
               </div>
-              
+
               <div className="space-y-2">
                 {balanceVisible ? (
                   <>
-                    <h2 className="text-3xl font-bold">₦{totalNairaValue.toLocaleString()}</h2>
-                    <p className="text-white/80">≈ ${(totalNairaValue / 750).toFixed(2)} USD</p>
+                    <h2 className="text-3xl font-bold">
+                      ₦{totalNairaValue.toLocaleString()}
+                    </h2>
+                    <p className="text-white/80">
+                      ≈ ${(totalNairaValue / 750).toFixed(2)} USD
+                    </p>
                   </>
                 ) : (
                   <>
@@ -127,10 +208,44 @@ export default function Wallet() {
                   </>
                 )}
               </div>
-              
+
               <div className="flex items-center gap-1 mt-3 text-sm">
                 <TrendingUp className="w-4 h-4" />
                 <span>+8.5% this week</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* --- ADD: StarkNet account summary card (Wallet.tsx) --- */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <WalletIcon className="w-5 h-5" />
+                StarkNet Wallet (Mainnet)
+              </CardTitle>
+              <CardDescription>
+                Auto-linked from Payments → Receive
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="text-xs text-muted-foreground">Address</div>
+              <div className="font-mono text-sm break-all">
+                {starknetAddress ?? "— not set yet —"}
+              </div>
+
+              <div className="mt-3 text-sm">
+                STRK Balance:{" "}
+                {isFetchingStrk ? (
+                  "Loading…"
+                ) : strkError ? (
+                  <span className="text-red-500">{strkError}</span>
+                ) : strkBalance !== null ? (
+                  (Number(strkBalance) / 1e18).toLocaleString(undefined, {
+                    maximumFractionDigits: 6,
+                  })
+                ) : (
+                  "—"
+                )}
               </div>
             </CardContent>
           </Card>
@@ -160,48 +275,53 @@ export default function Wallet() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {portfolioData.filter(asset => asset.id !== "btc").map((asset) => (
-                <Link 
-                  key={asset.id} 
-                  to={`/wallet/${asset.id}`}
-                  className="block"
-                >
-                  <div className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted transition-colors">
-                    <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-xl">
-                      {asset.icon}
-                    </div>
-                    
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">{asset.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {balanceVisible ? asset.amount : "****"} {asset.symbol}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold">
-                            {balanceVisible ? asset.nairaValue : "****"}
-                          </p>
-                          <div className="flex items-center gap-1">
-                            <Badge 
-                              variant={asset.isPositive ? "default" : "destructive"}
-                              className="text-xs"
-                            >
-                              {asset.isPositive ? (
-                                <TrendingUp className="w-3 h-3 mr-1" />
-                              ) : (
-                                <TrendingDown className="w-3 h-3 mr-1" />
-                              )}
-                              {asset.change24h}
-                            </Badge>
+              {portfolioTemplate
+                .filter((asset) => asset.id !== "btc")
+                .map((asset) => (
+                  <Link
+                    key={asset.id}
+                    to={`/wallet/${asset.id}`}
+                    className="block"
+                  >
+                    <div className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted transition-colors">
+                      <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-xl">
+                        {asset.icon}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold">{asset.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {balanceVisible ? asset.amount : "****"}{" "}
+                              {asset.symbol}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold">
+                              {balanceVisible ? asset.nairaValue : "****"}
+                            </p>
+                            <div className="flex items-center gap-1">
+                              <Badge
+                                variant={
+                                  asset.isPositive ? "default" : "destructive"
+                                }
+                                className="text-xs"
+                              >
+                                {asset.isPositive ? (
+                                  <TrendingUp className="w-3 h-3 mr-1" />
+                                ) : (
+                                  <TrendingDown className="w-3 h-3 mr-1" />
+                                )}
+                                {asset.change24h}
+                              </Badge>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                ))}
             </CardContent>
           </Card>
 
@@ -223,7 +343,7 @@ export default function Wallet() {
                   <p className="text-xs text-blue-500">+8.5%</p>
                 </div>
               </div>
-              
+
               <div className="text-center p-3 bg-muted rounded-lg">
                 <p className="text-sm text-muted-foreground">Best Performer</p>
                 <p className="font-semibold">Ethereum (ETH)</p>

@@ -28,7 +28,6 @@ import {
   Copy,
   Share,
   CheckCircle,
-  X,
   Loader2,
   Wallet,
   AlertCircle,
@@ -36,8 +35,19 @@ import {
   WifiOff,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import {
+  Account,
+  constants,
+  ec,
+  stark,
+  RpcProvider,
+  hash,
+  CallData,
+} from "starknet";
+import { ethers } from "ethers";
+import { getUserId, generateStarknetAddress, snKeys } from "@/lib/session";
 
-// Mock BottomNav component for demo
+// Mock BottomNav component
 const BottomNav = () => (
   <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
     <div className="text-center text-sm text-muted-foreground">
@@ -46,14 +56,15 @@ const BottomNav = () => (
   </div>
 );
 
+// Cryptocurrency options
 const cryptoOptions = [
   { value: "eth", label: "Ethereum (ETH)", rate: 1700000, network: "ethereum" },
   { value: "strk", label: "StarkNet (STRK)", rate: 60, network: "starknet" },
   { value: "usdc", label: "USDC", rate: 750, network: "ethereum" },
 ];
 
-// Types for AgentX API response
-interface AgentXWalletResponse {
+// Types for wallet response
+interface WalletResponse {
   address: string;
   publicKey: string;
   chainId: string;
@@ -64,96 +75,6 @@ interface QRCodeProps {
   value: string;
   size?: number;
 }
-
-// AgentX Wallet Service
-class AgentXWalletService {
-  private apiKey: string;
-  private baseUrl: string;
-
-  constructor() {
-    // In a real app, these would come from environment variables
-    this.apiKey = "demo_api_key_12345"; // Replace with actual API key
-    this.baseUrl = "https://api.agentx.so/v1";
-  }
-
-  private async makeRequest<T>(
-    endpoint: string,
-    options: RequestInit = {},
-  ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
-
-    // Simulate API call for demo
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        if (!this.apiKey || this.apiKey === "demo_api_key_12345") {
-          // Demo mode - return mock data
-          resolve({
-            address: this.generateMockAddress(options.body as string),
-            publicKey:
-              "0x04a7b1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab",
-            chainId: "1",
-            network: "ethereum",
-          } as T);
-        } else {
-          // Real API call would go here
-          fetch(url, {
-            ...options,
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${this.apiKey}`,
-              "X-API-Version": "1.0",
-              ...options.headers,
-            },
-          })
-            .then((response) => {
-              if (!response.ok) {
-                throw new Error(`AgentX API Error: ${response.statusText}`);
-              }
-              return response.json();
-            })
-            .then(resolve)
-            .catch(reject);
-        }
-      }, 1500); // Simulate network delay
-    });
-  }
-
-  private generateMockAddress(requestBody: string): string {
-    const params = JSON.parse(requestBody || "{}");
-    const mockAddresses = {
-      ethereum: "0x742d35Cc6C4C8B9A5A1f742d35Cc6C4C8B9A5A1f",
-      starknet:
-        "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7",
-    };
-    return (
-      mockAddresses[params.network as keyof typeof mockAddresses] ||
-      mockAddresses.ethereum
-    );
-  }
-
-  async generateWalletAddress(params: {
-    network: string;
-    currency: string;
-    userId?: string;
-  }): Promise<AgentXWalletResponse> {
-    return this.makeRequest<AgentXWalletResponse>("/wallets/generate", {
-      method: "POST",
-      body: JSON.stringify(params),
-    });
-  }
-
-  async testConnection(): Promise<boolean> {
-    try {
-      await this.makeRequest("/health");
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-}
-
-// Initialize service
-const agentXService = new AgentXWalletService();
 
 // Simple QR Code component
 const QRCodeGenerator: React.FC<QRCodeProps> = ({ value, size = 200 }) => {
@@ -253,42 +174,45 @@ export default function Payments() {
       ? (parseFloat(nairaAmount) / selectedCryptoData.rate).toFixed(6)
       : "";
 
-  // Check AgentX connection on mount
+  // Check Starknet connection on mount
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const connected = await agentXService.testConnection();
-        setIsConnected(connected);
-        setConnectionStatus(connected ? "connected" : "disconnected");
+        const provider = new RpcProvider({
+          nodeUrl: "https://starknet-mainnet.public.blastapi.io",
+        });
+        await provider.getChainId(); // Test connection
+        console.log("Provider", provider);
+
+        setIsConnected(true);
+        setConnectionStatus("connected");
       } catch (error) {
         setIsConnected(false);
         setConnectionStatus("disconnected");
-        console.error("AgentX connection failed:", error);
+        console.error("Starknet connection failed:", error);
       }
     };
 
     checkConnection();
   }, []);
 
-  // AgentX wallet generation
-  const generateAgentXWallet = async (): Promise<AgentXWalletResponse> => {
-    if (!selectedCryptoData) {
-      throw new Error(`Unsupported cryptocurrency: ${selectedCrypto}`);
-    }
-
+  // Get user-specific wallet address
+  const getUserWalletAddress = async (): Promise<string> => {
     try {
-      const walletData = await agentXService.generateWalletAddress({
-        network: selectedCryptoData.network,
-        currency: selectedCrypto.toUpperCase(),
-        userId: "user_" + Date.now(),
-      });
-
-      return walletData;
+      const userId = getUserId();
+      const storedAddress = localStorage.getItem(snKeys.address(userId));
+      
+      if (storedAddress) {
+        return storedAddress;
+      }
+      
+      // If no stored address, generate a new one
+      const walletData = await generateStarknetAddress();
+      localStorage.setItem(snKeys.address(userId), walletData.address);
+      return walletData.address;
     } catch (error) {
-      console.error("AgentX wallet generation failed:", error);
-      throw new Error(
-        `Failed to generate ${selectedCrypto.toUpperCase()} wallet address`,
-      );
+      console.error("Error getting user wallet address:", error);
+      throw new Error("Failed to get wallet address");
     }
   };
 
@@ -299,7 +223,7 @@ export default function Payments() {
     }
 
     if (!isConnected) {
-      setError("AgentX wallet service is not available");
+      setError("Wallet service is not available");
       return;
     }
 
@@ -307,16 +231,16 @@ export default function Payments() {
     setError("");
 
     try {
-      const walletData = await generateAgentXWallet();
-      setWalletAddress(walletData.address);
+      const address = await getUserWalletAddress();
+      setWalletAddress(address);
       setShowQRDialog(true);
     } catch (err) {
       const errorMessage =
         err instanceof Error
           ? err.message
-          : "Failed to generate wallet address";
+          : `Failed to get wallet address`;
       setError(errorMessage);
-      console.error("Wallet generation error:", err);
+      console.error("Wallet address error:", err);
     } finally {
       setIsGenerating(false);
     }
@@ -325,7 +249,6 @@ export default function Payments() {
   const copyAddress = async () => {
     try {
       await navigator.clipboard.writeText(walletAddress);
-      // Could add toast notification here
     } catch (err) {
       console.error("Failed to copy address:", err);
     }
@@ -369,7 +292,7 @@ export default function Payments() {
           >
             <ArrowLeft className="w-5 h-5 sm:text-inherit text-white" />
           </Button>
-          <h1 className="text-xl font-semibold">AgentX Payments</h1>
+          <h1 className="text-xl font-semibold">Payments</h1>
         </div>
       </header>
 
@@ -387,21 +310,21 @@ export default function Payments() {
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
                       <span className="text-sm text-gray-600">
-                        Connecting to AgentX...
+                        Checking connection...
                       </span>
                     </>
                   ) : connectionStatus === "connected" ? (
                     <>
                       <Wifi className="w-4 h-4 text-green-600" />
                       <span className="text-sm text-green-600">
-                        Connected to AgentX Wallet Service
+                        Connected to wallet service
                       </span>
                     </>
                   ) : (
                     <>
                       <WifiOff className="w-4 h-4 text-red-600" />
                       <span className="text-sm text-red-600">
-                        AgentX service unavailable (Demo Mode)
+                        Wallet service unavailable
                       </span>
                     </>
                   )}
@@ -417,8 +340,7 @@ export default function Payments() {
                   Receive Crypto Payment
                 </CardTitle>
                 <CardDescription>
-                  Generate an AgentX wallet address with automatic Naira
-                  conversion
+                  Generate a wallet address with automatic Naira conversion
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -498,7 +420,7 @@ export default function Payments() {
                   {isGenerating ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Generating AgentX Wallet...
+                      Generating Wallet...
                     </>
                   ) : (
                     <>
@@ -517,7 +439,7 @@ export default function Payments() {
       <Dialog open={showQRDialog} onOpenChange={closeQRDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>AgentX Payment QR Code</DialogTitle>
+            <DialogTitle>Payment QR Code</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-6 py-4">
@@ -538,7 +460,7 @@ export default function Payments() {
             <div className="space-y-3">
               <div>
                 <Label className="text-xs text-muted-foreground">
-                  AgentX Wallet Address
+                  Wallet Address
                 </Label>
                 <div className="bg-muted p-3 rounded-lg">
                   <p className="font-mono text-sm break-all">{walletAddress}</p>

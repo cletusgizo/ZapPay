@@ -8,8 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import BottomNav from "@/components/BottomNav";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { 
-  ArrowLeft, 
+import {
+  ArrowLeft,
   User,
   CreditCard,
   Shield,
@@ -24,11 +24,13 @@ import {
   Info
 } from "lucide-react";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { getUserId, snKeys } from "@/lib/session";
 
 export default function Profile() {
   const [searchParams] = useSearchParams();
   const defaultTab = searchParams.get("tab") || "business-info";
+  const navigate = useNavigate();
   
   const [businessInfo, setBusinessInfo] = useState({
     businessName: "TechCorp Solutions",
@@ -49,6 +51,20 @@ export default function Profile() {
     security: true,
     marketing: false
   });
+
+  const handleLogout = () => {
+    // Clear user-specific wallet address
+    try {
+      const userId = getUserId();
+      localStorage.removeItem(snKeys.address(userId));
+      console.log("Cleared wallet address for user:", userId);
+    } catch (error) {
+      console.error("Failed to clear wallet address:", error);
+    }
+    
+    // Navigate to home page (logout)
+    navigate("/");
+  };
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -313,7 +329,7 @@ export default function Profile() {
                         Get notified when you receive payments
                       </p>
                     </div>
-                    <Switch 
+                    <Switch
                       checked={notifications.payments}
                       onCheckedChange={(checked) => setNotifications({...notifications, payments: checked})}
                     />
@@ -326,7 +342,7 @@ export default function Profile() {
                         Get notified about bank transfers
                       </p>
                     </div>
-                    <Switch 
+                    <Switch
                       checked={notifications.transfers}
                       onCheckedChange={(checked) => setNotifications({...notifications, transfers: checked})}
                     />
@@ -339,7 +355,7 @@ export default function Profile() {
                         Important security notifications
                       </p>
                     </div>
-                    <Switch 
+                    <Switch
                       checked={notifications.security}
                       onCheckedChange={(checked) => setNotifications({...notifications, security: checked})}
                     />
@@ -352,7 +368,7 @@ export default function Profile() {
                         Product updates and promotions
                       </p>
                     </div>
-                    <Switch 
+                    <Switch
                       checked={notifications.marketing}
                       onCheckedChange={(checked) => setNotifications({...notifications, marketing: checked})}
                     />
@@ -414,11 +430,9 @@ export default function Profile() {
               {/* Sign Out */}
               <Card>
                 <CardContent className="p-4">
-                  <Button variant="destructive" className="w-full" asChild>
-                    <Link to="/">
-                      <LogOut className="w-4 h-4 mr-2" />
-                      Sign Out
-                    </Link>
+                  <Button variant="destructive" className="w-full" onClick={handleLogout}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign Out
                   </Button>
                 </CardContent>
               </Card>
