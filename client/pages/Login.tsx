@@ -63,22 +63,6 @@ export default function Login() {
           localStorage.setItem("userInfo", JSON.stringify(result.user));
         }
 
-        // Generate a new wallet address for this user
-        try {
-          const userId = result.user.id;
-          const walletData = await generateStarknetAddress();
-
-          // Store the wallet address with user-specific key
-          localStorage.setItem(snKeys.address(userId), walletData.address);
-
-          console.log(
-            "Generated new wallet address for user:",
-            walletData.address,
-          );
-        } catch (error) {
-          console.error("Failed to generate wallet address:", error);
-          // Continue with login even if wallet generation fails
-        }
 
         // Navigate to home
         navigate("/home");

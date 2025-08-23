@@ -290,7 +290,7 @@ export default function Payments() {
             size="icon"
             onClick={() => window.history.back()}
           >
-            <ArrowLeft className="w-5 h-5 sm:text-inherit text-white" />
+            <ArrowLeft className="w-5 h-5 sm:text-inherit text-blue-600" />
           </Button>
           <h1 className="text-xl font-semibold">Payments</h1>
         </div>
