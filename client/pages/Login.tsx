@@ -1,18 +1,18 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "../components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+} from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Separator } from "../components/ui/separator";
 import { ArrowLeft, Eye, EyeOff, Zap } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getUserId, generateStarknetAddress, snKeys } from "@/lib/session";
+import { getOrCreateWallet } from "../lib/session";
 
 const BASE_URL = "https://zappay-global.onrender.com";
 
@@ -48,6 +48,15 @@ export default function Login() {
         // Store user data and tokens in localStorage
         if (result.user && result.user.id) {
           localStorage.setItem("userId", result.user.id);
+
+          // Ensure user has a wallet address (one per account)
+          try {
+            const walletData = await getOrCreateWallet(result.user.id);
+            console.log("User wallet ensured:", walletData.address);
+          } catch (walletError) {
+            console.error("Error ensuring wallet for user:", walletError);
+            // Don't block login if wallet creation fails
+          }
         }
 
         if (result.accessToken) {
@@ -61,23 +70,6 @@ export default function Login() {
         // Store user info
         if (result.user) {
           localStorage.setItem("userInfo", JSON.stringify(result.user));
-        }
-
-        // Generate a new wallet address for this user
-        try {
-          const userId = result.user.id;
-          const walletData = await generateStarknetAddress();
-
-          // Store the wallet address with user-specific key
-          localStorage.setItem(snKeys.address(userId), walletData.address);
-
-          console.log(
-            "Generated new wallet address for user:",
-            walletData.address,
-          );
-        } catch (error) {
-          console.error("Failed to generate wallet address:", error);
-          // Continue with login even if wallet generation fails
         }
 
         // Navigate to home
