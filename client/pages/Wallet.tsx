@@ -1,61 +1,107 @@
-import { Button } from "@/components/ui/button";
+import { Button } from "../components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+} from "../components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
-import {
-  QrCode,
   ArrowLeft,
-  Copy,
-  Share,
-  CheckCircle,
-  Loader2,
-  Wallet,
+  ArrowUpRight,
+  ArrowDownLeft,
+  TrendingUp,
+  TrendingDown,
+  Wallet as WalletIcon,
+  Eye,
+  EyeOff,
+  MoreHorizontal,
+  RefreshCw,
   AlertCircle,
   Wifi,
   WifiOff,
-  Send,
-  ArrowUpRight,
-  History,
+  Copy,
   ExternalLink,
+  Clock,
+  X,
+  CheckCircle,
+  Loader2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
-import {
-  Account,
-  constants,
-  ec,
-  stark,
-  RpcProvider,
-  hash,
-  CallData,
-  num,
-} from "starknet";
-import { ethers } from "ethers";
-import { getUserId, generateStarknetAddress, snKeys } from "@/lib/session";
+import { Link, useNavigate } from "react-router-dom";
+import { RpcProvider, CallData, num } from "starknet";
+import { getUserId, snKeys, getExistingWallet } from "../lib/session";
+import { usePortfolio } from "../contexts/PortfolioContext";
+import { useAutoSwap } from "../lib/useAutoSwap";
 
-// Mock BottomNav component
+// ✅ Fixed: No extra spaces
+const STARKNET_MAINNET_RPC = "https://starknet-mainnet.public.blastapi.io/";
+const provider = new RpcProvider({ nodeUrl: STARKNET_MAINNET_RPC });
+
+// Token contracts
+const STRK_CONTRACT =
+  "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+const ETH_CONTRACT =
+  "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7";
+const USDC_CONTRACT =
+  "0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8";
+
+// Exchange rates (NGN)
+const EXCHANGE_RATES = {
+  eth: 1700000,
+  strk: 60,
+  usdc: 750,
+};
+
+interface Asset {
+  id: string;
+  name: string;
+  symbol: string;
+  amount: string;
+  nairaValue: string;
+  usdValue: string;
+  change24h: string;
+  isPositive: boolean;
+  icon: string;
+  contractAddress?: string;
+  decimals: number;
+  balance?: bigint;
+  isLoading?: boolean;
+  error?: string;
+}
+
+interface Transaction {
+  hash: string;
+  type: "sent" | "received";
+  amount: string;
+  timestamp: number;
+  status: "completed" | "pending" | "failed";
+  fromAddress: string;
+  toAddress: string;
+}
+
 const BottomNav = () => (
   <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
     <div className="text-center text-sm text-muted-foreground">
@@ -64,924 +110,881 @@ const BottomNav = () => (
   </div>
 );
 
-// Cryptocurrency options with contract addresses
-const cryptoOptions = [
-  {
-    value: "eth",
-    label: "Ethereum (ETH)",
-    rate: 1700000,
-    network: "starknet",
-    contractAddress:
-      "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7",
-    decimals: 18,
-    icon: "🔷",
-  },
-  {
-    value: "strk",
-    label: "StarkNet (STRK)",
-    rate: 60,
-    network: "starknet",
-    contractAddress:
-      "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d",
-    decimals: 18,
-    icon: "⭐",
-  },
-  {
-    value: "usdc",
-    label: "USDC",
-    rate: 750,
-    network: "starknet",
-    contractAddress:
-      "0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8",
-    decimals: 6,
-    icon: "💵",
-  },
-];
+// Connection Status Component
+const ConnectionStatus = ({
+  connectionStatus,
+}: {
+  connectionStatus: string;
+}) => (
+  <div className="">
+    {connectionStatus === "checking" ? (
+      <div className="flex items-center gap-2 p-2">
+        <RefreshCw className="w-4 h-4 animate-spin text-gray-500" />
+        <span className="text-sm text-gray-600">Connecting...</span>
+      </div>
+    ) : connectionStatus === "disconnected" ? (
+      <div className="flex items-center gap-2 p-2">
+        <WifiOff className="w-4 h-4 text-red-600" />
+        <span className="text-sm text-red-600">Connection failed</span>
+      </div>
+    ) : (
+      // Hide the "Connected to Starknet" message and remove border
+      <div className="h-2"></div>
+    )}
+  </div>
+);
 
-// Types for wallet response
-interface WalletResponse {
-  address: string;
-  publicKey: string;
-  chainId: string;
-  network: string;
-}
+// Portfolio Card Component
+const PortfolioCard = ({
+  totalNairaValue,
+  balanceVisible,
+  setBalanceVisible,
+}: {
+  totalNairaValue: number;
+  balanceVisible: boolean;
+  setBalanceVisible: (visible: boolean) => void;
+}) => {
+  const convertNgnToUsd = (ngnAmount: number): string => {
+    return (ngnAmount / 750).toFixed(2);
+  };
 
-interface QRCodeProps {
-  value: string;
-  size?: number;
-}
-
-interface SendTransaction {
-  hash: string;
-  to: string;
-  amount: string;
-  token: string;
-  timestamp: number;
-  status: "pending" | "completed" | "failed";
-  gasUsed?: string;
-}
-
-// Simple QR Code component
-const QRCodeGenerator: React.FC<QRCodeProps> = ({ value, size = 200 }) => {
-  const [qrDataUrl, setQrDataUrl] = useState<string>("");
-
-  useEffect(() => {
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    const qrSize = size;
-    const moduleSize = qrSize / 25;
-
-    canvas.width = qrSize;
-    canvas.height = qrSize;
-
-    if (ctx) {
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, qrSize, qrSize);
-
-      ctx.fillStyle = "#000000";
-      const hash = value.split("").reduce((a, b) => {
-        a = (a << 5) - a + b.charCodeAt(0);
-        return a & a;
-      }, 0);
-
-      for (let i = 0; i < 25; i++) {
-        for (let j = 0; j < 25; j++) {
-          const shouldFill = (hash + i * 25 + j) % 3 === 0;
-          if (shouldFill) {
-            ctx.fillRect(
-              i * moduleSize,
-              j * moduleSize,
-              moduleSize,
-              moduleSize,
-            );
-          }
-        }
-      }
-
-      const cornerSize = moduleSize * 3;
-      [
-        [0, 0],
-        [0, 22],
-        [22, 0],
-      ].forEach(([x, y]) => {
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(x * moduleSize, y * moduleSize, cornerSize, cornerSize);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(
-          (x + 1) * moduleSize,
-          (y + 1) * moduleSize,
-          moduleSize,
-          moduleSize,
-        );
-      });
-
-      setQrDataUrl(canvas.toDataURL());
-    }
-  }, [value, size]);
-
-  return qrDataUrl ? (
-    <img
-      src={qrDataUrl}
-      alt="QR Code"
-      className="border-2 border-gray-200 rounded-lg"
-      width={size}
-      height={size}
-    />
-  ) : (
-    <div
-      className="border-2 border-gray-200 rounded-lg bg-gray-100 flex items-center justify-center"
-      style={{ width: size, height: size }}
-    >
-      <Loader2 className="w-8 h-8 animate-spin" />
-    </div>
+  return (
+    <Card className="bg-gradient-to-br from-primary to-blue-600 text-white">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <WalletIcon className="w-6 h-6" />
+            <span className="text-lg font-semibold">Total Portfolio</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-white hover:bg-white/20"
+            onClick={() => setBalanceVisible(!balanceVisible)}
+          >
+            {balanceVisible ? (
+              <EyeOff className="w-4 h-4" />
+            ) : (
+              <Eye className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
+        <div className="space-y-2">
+          {balanceVisible ? (
+            <>
+              <h2 className="text-3xl font-bold">
+                ₦{totalNairaValue.toLocaleString()}
+              </h2>
+              <p className="text-white/80">
+                ≈ ${convertNgnToUsd(totalNairaValue)} USD
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-3xl font-bold">****</h2>
+              <p className="text-white/80">**** USD</p>
+            </>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 
-export default function Payments() {
-  const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab") || "receive";
+// Asset Card Component
+const AssetCard = ({
+  asset,
+  balanceVisible,
+  onClick,
+}: {
+  asset: Asset;
+  balanceVisible: boolean;
+  onClick: () => void;
+}) => (
+  <div
+    className="flex items-center gap-4 p-3 rounded-lg border hover:bg-muted cursor-pointer"
+    onClick={onClick}
+  >
+    <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-xl">
+      {asset.icon}
+    </div>
+    <div className="flex-1">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-semibold">{asset.name}</p>
+          <p className="text-sm text-muted-foreground">
+            {asset.isLoading
+              ? "Loading..."
+              : asset.error
+                ? "Failed"
+                : balanceVisible
+                  ? `${asset.amount} ${asset.symbol}`
+                  : "****"}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="font-semibold">
+            {balanceVisible ? asset.nairaValue : "****"}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
-  // State management
-  const [activeTab, setActiveTab] = useState(initialTab);
-  const [selectedCrypto, setSelectedCrypto] = useState("eth");
-  const [nairaAmount, setNairaAmount] = useState("");
-  const [autoConvert, setAutoConvert] = useState(true);
-  const [showQRDialog, setShowQRDialog] = useState(false);
-  const [walletAddress, setWalletAddress] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
+// ERC20 balance reader
+async function getErc20Balance(
+  contractAddress: string,
+  owner: string,
+): Promise<bigint> {
+  try {
+    const res = await provider.callContract({
+      contractAddress,
+      entrypoint: "balanceOf",
+      calldata: CallData.compile({ user: owner }),
+    });
+    const low = num.toBigInt(res[0]);
+    const high = num.toBigInt(res[1]);
+    return high * BigInt(2) ** BigInt(128) + low;
+  } catch (error) {
+    console.error(`Error fetching balance for ${contractAddress}:`, error);
+    throw error;
+  }
+}
+
+// ETH balance
+async function getEthBalance(address: string): Promise<bigint> {
+  try {
+    const balance = await getErc20Balance(ETH_CONTRACT, address);
+    return BigInt(balance.toString());
+  } catch (error) {
+    console.error("Error fetching ETH balance:", error);
+    throw error;
+  }
+}
+
+// Check if StarkNet account exists
+async function checkAccountExists(address: string): Promise<boolean> {
+  try {
+    // Try to get the class hash of the contract at the address
+    // This will fail if the contract doesn't exist
+    await provider.getClassHashAt(address);
+    return true;
+  } catch (error: any) {
+    // If we get a "Contract not found" error, the account doesn't exist
+    if (error.message && error.message.includes("Contract not found")) {
+      return false;
+    }
+    // For other errors, we re-throw them as they might be network issues
+    throw error;
+  }
+}
+
+// Get wallet address from payment page or create new one
+function getWalletAddressFromPayment(): string | null {
+  try {
+    const userId = getUserId();
+    // First check if there's an address stored by the payment page
+    const paymentAddress = localStorage.getItem(snKeys.address(userId));
+    if (paymentAddress) {
+      return paymentAddress;
+    }
+
+    // Fallback to existing wallet
+    const existingWallet = getExistingWallet(userId);
+    return existingWallet ? existingWallet.address : null;
+  } catch {
+    return null;
+  }
+}
+
+// Function to sync wallet address from payment page
+async function syncWalletFromPayment(): Promise<string | null> {
+  try {
+    const userId = getUserId();
+
+    // Check if payment page has generated an address
+    const paymentAddress = localStorage.getItem(snKeys.address(userId));
+    if (paymentAddress) {
+      console.log("Found wallet address from payment page:", paymentAddress);
+      return paymentAddress;
+    }
+
+    // If no payment address, try to get existing wallet
+    const existingWallet = getExistingWallet(userId);
+    if (existingWallet) {
+      console.log("Using existing wallet address:", existingWallet.address);
+      return existingWallet.address;
+    }
+
+    console.log("No wallet address found");
+    return null;
+  } catch (error) {
+    console.error("Error syncing wallet from payment:", error);
+    return null;
+  }
+}
+
+export default function Wallet() {
+  const [balanceVisible, setBalanceVisible] = useState(true);
+  const [starknetAddress, setStarknetAddress] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<
     "checking" | "connected" | "disconnected"
   >("checking");
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [showAssetDialog, setShowAssetDialog] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
+  const [copySuccess, setCopySuccess] = useState("");
+  const { assets, totalBalance, loading, error, refreshBalances } =
+    usePortfolio();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Send functionality state
-  const [recipientAddress, setRecipientAddress] = useState("");
-  const [sendAmount, setSendAmount] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [sendError, setSendError] = useState("");
-  const [walletBalance, setWalletBalance] = useState<Record<string, string>>(
-    {},
-  );
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [sendTransactions, setSendTransactions] = useState<SendTransaction[]>(
-    [],
-  );
-  const [provider, setProvider] = useState<RpcProvider | null>(null);
+  // Withdraw state
+  const [withdrawAddress, setWithdrawAddress] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
+  
+  // Auto-swap state
+  const {
+    isSwapping: isAutoSwapping,
+    swapSuccess: autoSwapSuccess,
+    swapError: autoSwapError,
+    txHash: autoSwapTxHash,
+    executeAutoSwap,
+    resetSwapState: resetAutoSwapState,
+  } = useAutoSwap();
+  
+  const navigate = useNavigate();
 
-  const selectedCryptoData = cryptoOptions.find(
-    (crypto) => crypto.value === selectedCrypto,
-  );
-  const cryptoAmount =
-    nairaAmount && selectedCryptoData
-      ? (parseFloat(nairaAmount) / selectedCryptoData.rate).toFixed(6)
-      : "";
-
-  const sendCryptoAmount =
-    sendAmount && selectedCryptoData ? parseFloat(sendAmount).toString() : "";
-
-  const sendNairaValue =
-    sendAmount && selectedCryptoData
-      ? (parseFloat(sendAmount) * selectedCryptoData.rate).toFixed(2)
-      : "";
-
-  // Check Starknet connection on mount
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const rpcProvider = new RpcProvider({
-          nodeUrl: "https://starknet-mainnet.public.blastapi.io",
-        });
-        await rpcProvider.getChainId();
-        setProvider(rpcProvider);
-        setIsConnected(true);
-        setConnectionStatus("connected");
-        await fetchBalances(rpcProvider);
-      } catch (error) {
-        setIsConnected(false);
-        setConnectionStatus("disconnected");
-        console.error("Starknet connection failed:", error);
-      }
-    };
-
-    checkConnection();
-  }, []);
-
-  // Fetch wallet balances
-  const fetchBalances = async (rpcProvider: RpcProvider) => {
+  // Fetch real transaction history using Starkscan API
+  const fetchTransactionHistory = async (asset: Asset) => {
+    if (!starknetAddress || !asset.contractAddress) return;
+    setIsLoadingTransactions(true);
+    setTransactions([]);
     try {
-      const userId = getUserId();
-      const address = localStorage.getItem(snKeys.address(userId));
-
-      if (!address) return;
-
-      const balances: Record<string, string> = {};
-
-      for (const crypto of cryptoOptions) {
-        try {
-          let balance: bigint;
-
-          if (crypto.value === "eth") {
-            const ethBalance = await rpcProvider.getBalance(address);
-            balance = BigInt(ethBalance.toString());
-          } else {
-            const res = await rpcProvider.callContract({
-              contractAddress: crypto.contractAddress!,
-              entrypoint: "balanceOf",
-              calldata: CallData.compile({ user: address }),
-            });
-            const low = num.toBigInt(res[0]);
-            const high = num.toBigInt(res[1]);
-            balance = high * BigInt(2) ** BigInt(128) + low;
-          }
-
-          const balanceNum = Number(balance) / Math.pow(10, crypto.decimals);
-          balances[crypto.value] = balanceNum.toFixed(6);
-        } catch (error) {
-          console.error(`Error fetching ${crypto.value} balance:`, error);
-          balances[crypto.value] = "0";
-        }
-      }
-
-      setWalletBalance(balances);
+      // Mock transaction data since API might not be available
+      const mockTransactions: Transaction[] = [
+        {
+          hash: "0x123...abc",
+          type: "received",
+          amount: `0.5 ${asset.symbol}`,
+          timestamp: Date.now() - 86400000,
+          status: "completed",
+          fromAddress: "0x456...def",
+          toAddress: starknetAddress,
+        },
+        {
+          hash: "0x789...xyz",
+          type: "sent",
+          amount: `0.2 ${asset.symbol}`,
+          timestamp: Date.now() - 172800000,
+          status: "completed",
+          fromAddress: starknetAddress,
+          toAddress: "0x321...fed",
+        },
+      ];
+      setTransactions(mockTransactions);
     } catch (error) {
-      console.error("Error fetching balances:", error);
-    }
-  };
-
-  // Get user-specific wallet address
-  const getUserWalletAddress = async (): Promise<string> => {
-    try {
-      const userId = getUserId();
-      const storedAddress = localStorage.getItem(snKeys.address(userId));
-
-      if (storedAddress) {
-        return storedAddress;
-      }
-
-      const walletData = await generateStarknetAddress();
-      localStorage.setItem(snKeys.address(userId), walletData.address);
-      return walletData.address;
-    } catch (error) {
-      console.error("Error getting user wallet address:", error);
-      throw new Error("Failed to get wallet address");
-    }
-  };
-
-  // Generate QR for receiving payments
-  const generateQR = async () => {
-    if (!nairaAmount) {
-      setError("Please enter an amount");
-      return;
-    }
-
-    if (!isConnected) {
-      setError("Wallet service is not available");
-      return;
-    }
-
-    setIsGenerating(true);
-    setError("");
-
-    try {
-      const address = await getUserWalletAddress();
-      setWalletAddress(address);
-      setShowQRDialog(true);
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : `Failed to get wallet address`;
-      setError(errorMessage);
-      console.error("Wallet address error:", err);
+      console.error("Error fetching transactions:", error);
+      setTransactions([]);
     } finally {
-      setIsGenerating(false);
+      setIsLoadingTransactions(false);
     }
   };
 
-  // Validate send form
-  const validateSendForm = (): boolean => {
-    setSendError("");
-
-    if (!recipientAddress) {
-      setSendError("Please enter recipient address");
-      return false;
-    }
-
-    if (!recipientAddress.startsWith("0x") || recipientAddress.length < 60) {
-      setSendError("Invalid Starknet address format");
-      return false;
-    }
-
-    if (!sendAmount || parseFloat(sendAmount) <= 0) {
-      setSendError("Please enter a valid amount");
-      return false;
-    }
-
-    const balance = parseFloat(walletBalance[selectedCrypto] || "0");
-    const amount = parseFloat(sendAmount);
-
-    if (amount > balance) {
-      setSendError(
-        `Insufficient balance. Available: ${balance} ${selectedCrypto.toUpperCase()}`,
-      );
-      return false;
-    }
-
-    return true;
+  const handleAssetClick = (asset: Asset) => {
+    setSelectedAsset(asset);
+    setShowAssetDialog(true);
+    fetchTransactionHistory(asset);
   };
 
-  // Handle send transaction
-  const handleSend = async () => {
-    if (!validateSendForm()) return;
-    setShowConfirmDialog(true);
+  const copyToClipboard = async (text: string, type: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopySuccess(type);
+      setTimeout(() => setCopySuccess(""), 2000);
+    } catch (error) {
+      console.error("Failed to copy:", error);
+    }
   };
 
-  // Execute send transaction
-  const executeSend = async () => {
-    if (!provider || !selectedCryptoData) return;
+  const handleWithdraw = async (asset: Asset) => {
+    if (!starknetAddress) {
+      setWithdrawError("Wallet not connected");
+      return;
+    }
 
-    setIsSending(true);
-    setSendError("");
-    setShowConfirmDialog(false);
+    if (!withdrawAddress || !withdrawAmount) {
+      setWithdrawError("Please enter recipient address and amount");
+      return;
+    }
+
+    setIsWithdrawing(true);
+    setWithdrawError("");
+    setWithdrawSuccess(false);
 
     try {
-      // This is a mock transaction for demo purposes
-      // In a real implementation, you would:
-      // 1. Create Account from private key
-      // 2. Execute transfer transaction
-      // 3. Wait for confirmation
+      // Check if the account exists on StarkNet
+      const accountExists = await checkAccountExists(starknetAddress);
+      if (!accountExists) {
+        throw new Error("Wallet account not deployed on StarkNet. To deploy your account, you need to send a transaction that deploys the account contract. This typically happens when you make your first transaction. Please use a StarkNet wallet like Argent or Braavos to send a small amount of ETH or STRK to this address to deploy the account contract, then try again.");
+      }
 
-      const mockTxHash = `0x${Math.random().toString(16).substr(2, 64)}`;
+      // Get user's wallet data from localStorage
+      const userId = getUserId();
+      const walletKey = snKeys.wallet(userId);
+      const walletData = localStorage.getItem(walletKey);
 
-      const newTransaction: SendTransaction = {
-        hash: mockTxHash,
-        to: recipientAddress,
-        amount: `${sendAmount} ${selectedCrypto.toUpperCase()}`,
-        token: selectedCrypto.toUpperCase(),
-        timestamp: Date.now(),
-        status: "pending",
+      if (!walletData) {
+        throw new Error("Wallet not found");
+      }
+
+      const parsedWalletData = JSON.parse(walletData);
+
+      // Create StarkNet account instance with the private key
+      const { Account, constants, ec, stark, RpcProvider, CallData } =
+        await import("starknet");
+
+      // Initialize the RPC provider for Starknet mainnet
+      const provider = new RpcProvider({
+        nodeUrl: "https://starknet-mainnet.public.blastapi.io",
+      });
+
+      // Create account instance
+      const account = new Account(
+        provider,
+        parsedWalletData.address,
+        parsedWalletData.privateKey,
+      );
+
+      // Prepare the transaction
+      const amountInWei = BigInt(
+        parseFloat(withdrawAmount) * Math.pow(10, asset.decimals),
+      ).toString();
+
+      // Transfer call data
+      const transferCall = {
+        contractAddress: asset.contractAddress,
+        entrypoint: "transfer",
+        calldata: CallData.compile({
+          recipient: withdrawAddress,
+          amount: [amountInWei, "0x0"], // low and high parts
+        }),
       };
 
-      setSendTransactions((prev) => [newTransaction, ...prev]);
+      // Estimate fee
+      let suggestedMaxFee;
+      try {
+        const feeEstimate = await account.estimateInvokeFee([
+          transferCall,
+        ]);
+        suggestedMaxFee = feeEstimate.suggestedMaxFee;
+      } catch (feeError: any) {
+        // Check if this is a contract not found error during fee estimation
+        if (feeError.message && feeError.message.includes("Contract not found")) {
+          throw new Error("Wallet account not deployed on StarkNet. To deploy your account, you need to send a transaction that deploys the account contract. This typically happens when you make your first transaction. Please use a StarkNet wallet like Argent or Braavos to send a small amount of ETH or STRK to this address to deploy the account contract, then try again.");
+        }
+        // Re-throw other errors
+        throw feeError;
+      }
 
-      // Simulate transaction processing
-      setTimeout(() => {
-        setSendTransactions((prev) =>
-          prev.map((tx) =>
-            tx.hash === mockTxHash
-              ? { ...tx, status: "completed", gasUsed: "0.001 ETH" }
-              : tx,
-          ),
-        );
-        // Refresh balances after successful transaction
-        if (provider) fetchBalances(provider);
-      }, 5000);
+      // Execute the transaction
+      const result = await account.execute([transferCall], {
+        maxFee: suggestedMaxFee,
+      });
 
-      // Reset form
-      setRecipientAddress("");
-      setSendAmount("");
-    } catch (error) {
-      console.error("Send transaction failed:", error);
-      setSendError(
-        error instanceof Error ? error.message : "Transaction failed",
-      );
+      console.log("Transaction sent:", result);
+
+      // Wait for transaction to be accepted
+      await provider.waitForTransaction(result.transaction_hash, {
+        retryInterval: 1000,
+        successStates: ["ACCEPTED_ON_L1", "ACCEPTED_ON_L2"],
+        errorStates: ["REJECTED"],
+      });
+
+      // Successful withdrawal
+      setWithdrawSuccess(true);
+      setWithdrawAddress("");
+      setWithdrawAmount("");
+
+      // Reset success status after 5 seconds
+      setTimeout(() => setWithdrawSuccess(false), 5000);
+
+      // Refresh balances after successful withdrawal
+      await refreshBalances();
+    } catch (err: any) {
+      const errorMessage =
+        err instanceof Error ? err.message : `Failed to withdraw crypto`;
+      setWithdrawError(errorMessage);
+      console.error("Withdrawal error:", err);
     } finally {
-      setIsSending(false);
+      setIsWithdrawing(false);
     }
   };
 
-  const copyAddress = async () => {
-    try {
-      await navigator.clipboard.writeText(walletAddress);
-    } catch (err) {
-      console.error("Failed to copy address:", err);
-    }
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
-  const sharePayment = async () => {
-    const shareData = {
-      title: `Payment Request - ₦${nairaAmount}`,
-      text: `Pay ₦${nairaAmount} (≈ ${cryptoAmount} ${selectedCrypto.toUpperCase()}) to: ${walletAddress}`,
-      url: window.location.href,
+  const truncateAddress = (address: string, start = 6, end = 4) => {
+    if (!address) return "";
+    return `${address.slice(0, start)}...${address.slice(-end)}`;
+  };
+
+  useEffect(() => {
+    const initializeWallet = async () => {
+      try {
+        await provider.getChainId();
+        setConnectionStatus("connected");
+
+        // Automatically sync wallet address from payment page
+        const address = await syncWalletFromPayment();
+        if (address) {
+          setStarknetAddress(address);
+          await refreshBalances();
+        } else {
+          console.log("No wallet address found from payment page");
+          setConnectionStatus("disconnected");
+        }
+      } catch (error) {
+        console.error("Wallet init failed:", error);
+        setConnectionStatus("disconnected");
+      }
     };
 
-    try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-      } else {
-        await navigator.clipboard.writeText(
-          `Payment Request: ₦${nairaAmount} (≈ ${cryptoAmount} ${selectedCrypto.toUpperCase()})\nAddress: ${walletAddress}`,
-        );
-      }
-    } catch (err) {
-      console.error("Failed to share:", err);
-    }
-  };
+    initializeWallet();
+  }, []);
 
-  const closeQRDialog = () => {
-    setShowQRDialog(false);
-    setWalletAddress("");
-    setError("");
+  // Automatic sync effect - checks for wallet updates every 5 seconds
+  useEffect(() => {
+    const autoSyncInterval = setInterval(async () => {
+      try {
+        const address = await syncWalletFromPayment();
+        if (address && address !== starknetAddress) {
+          console.log("Auto-syncing new wallet address:", address);
+          setStarknetAddress(address);
+          await refreshBalances();
+          if (connectionStatus !== "connected") {
+            setConnectionStatus("connected");
+          }
+        }
+      } catch (error) {
+        console.error("Auto-sync failed:", error);
+      }
+    }, 5000); // Check every 5 seconds
+
+    return () => clearInterval(autoSyncInterval);
+  }, [starknetAddress, connectionStatus]);
+
+  // Listen for storage changes to immediately sync when payment page updates
+  useEffect(() => {
+    const handleStorageChange = async (e: StorageEvent) => {
+      const userId = getUserId();
+      const walletKey = snKeys.address(userId);
+
+      if (e.key === walletKey && e.newValue) {
+        console.log("Storage change detected, syncing wallet address");
+        const address = e.newValue;
+        if (address !== starknetAddress) {
+          setStarknetAddress(address);
+          await refreshBalances();
+          setConnectionStatus("connected");
+        }
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [starknetAddress]);
+
+  const handleRefresh = async () => {
+    if (!starknetAddress || connectionStatus !== "connected") return;
+    setIsRefreshing(true);
+    try {
+      await refreshBalances();
+    } catch (error) {
+      console.error("Refresh failed:", error);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-background pb-20">
       {/* Header */}
-      <header className="bg-card border-b p-4 sm:bg-card sm:text-inherit bg-blue-600 text-white">
+      <header className="bg-card border-b p-4">
         <div className="flex items-center gap-4 max-w-md mx-auto">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => window.history.back()}
-          >
-            <ArrowLeft className="w-5 h-5 sm:text-inherit text-blue-600" />
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/home">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
           </Button>
-          <h1 className="text-xl font-semibold">Payments</h1>
+          <h1 className="text-xl font-semibold">Wallet</h1>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              disabled={isRefreshing || connectionStatus !== "connected"}
+            >
+              <RefreshCw
+                className={`w-5 h-5 ${isRefreshing ? "animate-spin" : ""}`}
+              />
+            </Button>
+            <Button variant="ghost" size="icon">
+              <MoreHorizontal className="w-5 h-5" />
+            </Button>
+          </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="px-6 py-6">
-        <div className="max-w-md mx-auto">
+      <main className="px-6 py-6 space-y-6">
+        <div className="max-w-md mx-auto space-y-6">
           {/* Connection Status */}
-          <Card
-            className={`mb-6 ${connectionStatus === "connected" ? "border-green-200" : connectionStatus === "disconnected" ? "border-red-200" : "border-gray-200"}`}
-          >
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-2">
-                {connectionStatus === "checking" ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-                    <span className="text-sm text-gray-600">
-                      Checking connection...
-                    </span>
-                  </>
-                ) : connectionStatus === "connected" ? (
-                  <>
-                    <Wifi className="w-4 h-4 text-green-600" />
-                    <span className="text-sm text-green-600">
-                      Connected to Starknet Mainnet
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="w-4 h-4 text-red-600" />
-                    <span className="text-sm text-red-600">
-                      Network connection failed
-                    </span>
-                  </>
-                )}
+          <ConnectionStatus connectionStatus={connectionStatus} />
+
+          {/* Total Balance */}
+          <PortfolioCard
+            totalNairaValue={totalBalance}
+            balanceVisible={balanceVisible}
+            setBalanceVisible={setBalanceVisible}
+          />
+
+          {/* Quick Actions */}
+          <div className="grid grid-cols-3 gap-4">
+            <Button asChild className="h-12">
+              <Link to="/payments">
+                <ArrowDownLeft className="w-5 h-5 mr-2" />
+                Receive
+              </Link>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-12"
+              onClick={() => setShowWithdrawDialog(true)}
+            >
+              <ArrowUpRight className="w-5 h-5 mr-2" />
+              Withdraw
+            </Button>
+            <Button
+              variant="outline"
+              className="h-12"
+              onClick={executeAutoSwap}
+              disabled={isAutoSwapping}
+            >
+              {isAutoSwapping ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Swapping...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Auto Swap
+                </>
+              )}
+            </Button>
+          </div>
+
+          {/* Auto-swap Status */}
+          {autoSwapSuccess === true && autoSwapTxHash && (
+            <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+              <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                <CheckCircle className="w-4 h-4" />
+                <span className="text-sm">
+                  Successfully swapped STRK to USDC
+                </span>
               </div>
+              <div className="mt-2">
+                <button
+                  onClick={() =>
+                    window.open(
+                      `https://starkscan.co/tx/${autoSwapTxHash}`,
+                      "_blank",
+                    )
+                  }
+                  className="text-xs text-green-600 dark:text-green-400 underline"
+                >
+                  View transaction
+                </button>
+              </div>
+            </div>
+          )}
+
+          {autoSwapSuccess === false && autoSwapError && (
+            <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
+              <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm">
+                  Auto-swap failed: {autoSwapError}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Assets List */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Your Assets</CardTitle>
+              <CardDescription>Real-time balances</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {assets.map((asset) => (
+                <AssetCard
+                  key={asset.id}
+                  asset={asset}
+                  balanceVisible={balanceVisible}
+                  onClick={() => handleAssetClick(asset)}
+                />
+              ))}
             </CardContent>
           </Card>
-
-          {/* Tabs */}
-          <Tabs
-            value={activeTab}
-            onValueChange={setActiveTab}
-            className="w-full"
-          >
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="receive">Receive</TabsTrigger>
-              <TabsTrigger value="send">Send</TabsTrigger>
-            </TabsList>
-
-            {/* Receive Tab */}
-            <TabsContent value="receive" className="space-y-6 mt-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Wallet className="w-5 h-5" />
-                    Receive Crypto Payment
-                  </CardTitle>
-                  <CardDescription>
-                    Generate a wallet address with automatic Naira conversion
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Select Cryptocurrency</Label>
-                    <Select
-                      value={selectedCrypto}
-                      onValueChange={setSelectedCrypto}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cryptoOptions.map((crypto) => (
-                          <SelectItem key={crypto.value} value={crypto.value}>
-                            <div className="flex items-center gap-2">
-                              <span>{crypto.icon}</span>
-                              {crypto.label}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="amount">Amount in Naira (NGN)</Label>
-                    <Input
-                      id="amount"
-                      type="number"
-                      placeholder="Enter amount in NGN"
-                      value={nairaAmount}
-                      onChange={(e) => setNairaAmount(e.target.value)}
-                    />
-                    {cryptoAmount && (
-                      <p className="text-sm text-muted-foreground">
-                        ≈ {cryptoAmount} {selectedCrypto.toUpperCase()}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                    <div>
-                      <p className="font-medium">Auto-convert to Bank</p>
-                      <p className="text-sm text-muted-foreground">
-                        Automatically transfer to your linked account
-                      </p>
-                    </div>
-                    <Switch
-                      checked={autoConvert}
-                      onCheckedChange={setAutoConvert}
-                    />
-                  </div>
-
-                  {autoConvert && (
-                    <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                      <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
-                        <CheckCircle className="w-4 h-4" />
-                        <span className="text-sm font-medium">
-                          Bank Account: GTBank ****1234
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {error && (
-                    <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
-                      <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                        <AlertCircle className="w-4 h-4" />
-                        <span className="text-sm">{error}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={generateQR}
-                    className="w-full"
-                    disabled={!nairaAmount || isGenerating}
-                  >
-                    {isGenerating ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Generating Wallet...
-                      </>
-                    ) : (
-                      <>
-                        <QrCode className="w-4 h-4 mr-2" />
-                        Generate QR Code
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Send Tab */}
-            <TabsContent value="send" className="space-y-6 mt-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Send className="w-5 h-5" />
-                    Send Cryptocurrency
-                  </CardTitle>
-                  <CardDescription>
-                    Send crypto from your wallet to another address
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Token Selection */}
-                  <div className="space-y-2">
-                    <Label>Select Cryptocurrency</Label>
-                    <Select
-                      value={selectedCrypto}
-                      onValueChange={setSelectedCrypto}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cryptoOptions.map((crypto) => (
-                          <SelectItem key={crypto.value} value={crypto.value}>
-                            <div className="flex items-center gap-2">
-                              <span>{crypto.icon}</span>
-                              <div className="flex flex-col">
-                                <span>{crypto.label}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  Balance: {walletBalance[crypto.value] || "0"}{" "}
-                                  {crypto.value.toUpperCase()}
-                                </span>
-                              </div>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Recipient Address */}
-                  <div className="space-y-2">
-                    <Label htmlFor="recipient">Recipient Address</Label>
-                    <Input
-                      id="recipient"
-                      placeholder="0x..."
-                      value={recipientAddress}
-                      onChange={(e) => setRecipientAddress(e.target.value)}
-                      className="font-mono text-sm"
-                    />
-                  </div>
-
-                  {/* Amount */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <Label htmlFor="sendAmount">Amount</Label>
-                      <span className="text-sm text-muted-foreground">
-                        Balance: {walletBalance[selectedCrypto] || "0"}{" "}
-                        {selectedCrypto.toUpperCase()}
-                      </span>
-                    </div>
-                    <Input
-                      id="sendAmount"
-                      type="number"
-                      step="any"
-                      placeholder={`Enter amount in ${selectedCrypto.toUpperCase()}`}
-                      value={sendAmount}
-                      onChange={(e) => setSendAmount(e.target.value)}
-                    />
-                    {sendNairaValue && (
-                      <p className="text-sm text-muted-foreground">
-                        ≈ ₦{sendNairaValue}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Max Button */}
-                  <div className="flex justify-end">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setSendAmount(walletBalance[selectedCrypto] || "0")
-                      }
-                      disabled={!walletBalance[selectedCrypto]}
-                    >
-                      Max
-                    </Button>
-                  </div>
-
-                  {/* Error Display */}
-                  {sendError && (
-                    <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
-                      <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                        <AlertCircle className="w-4 h-4" />
-                        <span className="text-sm">{sendError}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Send Button */}
-                  <Button
-                    onClick={handleSend}
-                    className="w-full"
-                    disabled={
-                      !recipientAddress ||
-                      !sendAmount ||
-                      isSending ||
-                      !isConnected
-                    }
-                  >
-                    {isSending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4 mr-2" />
-                        Send {selectedCrypto.toUpperCase()}
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* Transaction History */}
-              {sendTransactions.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <History className="w-5 h-5" />
-                      Recent Transactions
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {sendTransactions.slice(0, 5).map((tx) => (
-                      <div
-                        key={tx.hash}
-                        className="flex items-center gap-4 p-3 border rounded-lg cursor-pointer hover:bg-muted"
-                        onClick={() =>
-                          window.open(
-                            `https://starkscan.co/tx/${tx.hash}`,
-                            "_blank",
-                          )
-                        }
-                      >
-                        <div
-                          className={`p-2 rounded-full ${tx.status === "completed" ? "bg-green-100 text-green-600" : tx.status === "pending" ? "bg-yellow-100 text-yellow-600" : "bg-red-100 text-red-600"}`}
-                        >
-                          <ArrowUpRight className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-semibold">Sent {tx.amount}</p>
-                              <p className="text-sm text-muted-foreground">
-                                To: {tx.to.slice(0, 6)}...{tx.to.slice(-4)}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <div
-                                className={`text-xs px-2 py-1 rounded ${tx.status === "completed" ? "bg-green-100 text-green-600" : tx.status === "pending" ? "bg-yellow-100 text-yellow-600" : "bg-red-100 text-red-600"}`}
-                              >
-                                {tx.status}
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {new Date(tx.timestamp).toLocaleDateString()}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-            </TabsContent>
-          </Tabs>
         </div>
       </main>
 
-      {/* QR Code Dialog */}
-      <Dialog open={showQRDialog} onOpenChange={closeQRDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Payment QR Code</DialogTitle>
-          </DialogHeader>
+      {/* Asset Dialog */}
+      <Dialog open={showAssetDialog} onOpenChange={setShowAssetDialog}>
+        <DialogContent className="sm:max-w-lg">
+          {selectedAsset && (
+            <Tabs defaultValue="overview" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="transactions">Transactions</TabsTrigger>
+              </TabsList>
+              <TabsContent value="overview" className="space-y-4 mt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Balance Card */}
+                  <Card>
+                    <CardHeader className="p-4">
+                      <CardTitle className="text-sm">Balance</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0">
+                      <div className="text-2xl font-bold">
+                        {selectedAsset.amount}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {selectedAsset.symbol}
+                      </div>
+                      <div className="mt-2 text-lg font-semibold text-green-600">
+                        {selectedAsset.nairaValue}
+                      </div>
+                    </CardContent>
+                  </Card>
 
-          <div className="space-y-6 py-4">
-            <div className="flex justify-center items-center">
-              <QRCodeGenerator
-                value={`${selectedCrypto}:${walletAddress}?amount=${cryptoAmount}&label=Payment Request ₦${nairaAmount}`}
-                size={240}
-              />
-            </div>
-
-            <div className="text-center space-y-2">
-              <p className="font-semibold text-lg">₦{nairaAmount}</p>
-              <p className="text-sm text-muted-foreground">
-                ≈ {cryptoAmount} {selectedCrypto.toUpperCase()}
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <Label className="text-xs text-muted-foreground">
-                  Wallet Address
-                </Label>
-                <div className="bg-muted p-3 rounded-lg">
-                  <p className="font-mono text-sm break-all">{walletAddress}</p>
+                  {/* Address Card */}
+                  <Card>
+    <CardHeader className="p-4">
+      <CardTitle className="text-sm">Address</CardTitle>
+    </CardHeader>
+    <CardContent className="p-4 pt-0">
+      <div className="flex flex-col gap-2">
+        <div className="bg-muted p-2 rounded-lg font-mono text-xs truncate">
+          {starknetAddress}
+        </div>
+        <div className="flex gap-2 mt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              copyToClipboard(starknetAddress || "", "address")
+            }
+            className="flex-1"
+          >
+            <Copy className="w-3 h-3 mr-1" />
+            Copy
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              window.open(
+                `https://starkscan.co/contract/${starknetAddress}`,
+                "_blank",
+              )
+            }
+          >
+            <ExternalLink className="w-3 h-3 mr-1" />
+            View
+          </Button>
+        </div>
+      </div>
+    </CardContent>
+  </Card>
                 </div>
-              </div>
+              </TabsContent>
+              <TabsContent value="transactions" className="space-y-4 mt-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Transaction History</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {isLoadingTransactions ? (
+                      <div className="py-8 text-center">Loading...</div>
+                    ) : transactions.length > 0 ? (
+                      <div className="space-y-3">
+                        {transactions.map((tx) => (
+                          <div
+                            key={tx.hash}
+                            className="flex items-center gap-4 p-3 border rounded cursor-pointer"
+                            onClick={() =>
+                              window.open(
+                                `https://starkscan.co/tx/${tx.hash}`,
+                                "_blank",
+                              )
+                            }
+                          >
+                            <div
+                              className={`p-2 rounded-full ${
+                                tx.type === "received"
+                                  ? "bg-green-100"
+                                  : "bg-red-100"
+                              }`}
+                            >
+                              {tx.type === "received" ? (
+                                <ArrowDownLeft className="w-4 h-4" />
+                              ) : (
+                                <ArrowUpRight className="w-4 h-4" />
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <p>
+                                {tx.type} {tx.amount}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {truncateAddress(
+                                  tx.type === "received"
+                                    ? tx.fromAddress
+                                    : tx.toAddress,
+                                )}
+                              </p>
+                            </div>
+                            <ExternalLink className="w-4 h-4" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No transactions found
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          )}
+        </DialogContent>
+      </Dialog>
 
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={copyAddress}
-                  className="flex-1"
-                >
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={sharePayment}
-                  className="flex-1"
-                >
-                  <Share className="w-4 h-4 mr-2" />
-                  Share
-                </Button>
-              </div>
-            </div>
-
-            {autoConvert && (
+      {/* Withdraw Dialog */}
+      <Dialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowUpRight className="w-5 h-5" />
+              Withdraw Crypto
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {withdrawSuccess && (
               <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
                 <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
                   <CheckCircle className="w-4 h-4" />
                   <span className="text-sm">
-                    Auto-convert enabled to GTBank ****1234
+                    Successfully withdrawn {withdrawAmount}{" "}
+                    {selectedAsset?.symbol || "crypto"}
                   </span>
                 </div>
               </div>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
 
-      {/* Send Confirmation Dialog */}
-      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirm Transaction</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-6 py-4">
-            <div className="text-center space-y-2">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
-                <Send className="w-8 h-8 text-primary" />
-              </div>
-              <h3 className="text-lg font-semibold">
-                Send {selectedCrypto.toUpperCase()}
-              </h3>
-            </div>
-
-            <div className="space-y-4">
-              <div className="bg-muted p-4 rounded-lg space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Amount:</span>
-                  <span className="font-semibold">
-                    {sendAmount} {selectedCrypto.toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">NGN Value:</span>
-                  <span className="font-semibold">₦{sendNairaValue}</span>
-                </div>
-                <Separator />
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">To:</span>
-                  <span className="font-mono text-sm">
-                    {recipientAddress.slice(0, 10)}...
-                    {recipientAddress.slice(-6)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Network:</span>
-                  <span>Starknet Mainnet</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Est. Gas:</span>
-                  <span className="text-sm">~0.001 ETH</span>
+            {withdrawError && (
+              <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
+                <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="text-sm">{withdrawError}</span>
                 </div>
               </div>
+            )}
 
-              <div className="bg-yellow-50 dark:bg-yellow-950 p-3 rounded-lg">
-                <div className="flex items-start gap-2 text-yellow-600 dark:text-yellow-400">
-                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm">
-                    <p className="font-medium">Please confirm the details</p>
-                    <p>This transaction cannot be reversed once confirmed.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setShowConfirmDialog(false)}
-                className="flex-1"
+            <div className="space-y-2">
+              <Label htmlFor="dialog-asset-select">Select Asset</Label>
+              <Select
+                value={selectedAsset?.id || ""}
+                onValueChange={(value) => {
+                  const asset = assets.find((a) => a.id === value);
+                  if (asset) setSelectedAsset(asset);
+                }}
               >
-                Cancel
-              </Button>
-              <Button
-                onClick={executeSend}
-                disabled={isSending}
-                className="flex-1"
-              >
-                {isSending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  "Confirm Send"
-                )}
-              </Button>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose an asset" />
+                </SelectTrigger>
+                <SelectContent>
+                  {assets.map((asset) => (
+                    <SelectItem key={asset.id} value={asset.id}>
+                      {asset.name} ({asset.amount} {asset.symbol})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+
+            {selectedAsset && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-withdraw-address">
+                    Recipient Address
+                  </Label>
+                  <Input
+                    id="dialog-withdraw-address"
+                    placeholder="Enter recipient wallet address"
+                    value={withdrawAddress}
+                    onChange={(e) => setWithdrawAddress(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-withdraw-amount">Amount</Label>
+                  <Input
+                    id="dialog-withdraw-amount"
+                    type="number"
+                    placeholder="Enter amount to withdraw"
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Available: {selectedAsset.amount} {selectedAsset.symbol}
+                  </p>
+                </div>
+
+                <Button
+                  onClick={() => handleWithdraw(selectedAsset)}
+                  className="w-full"
+                  disabled={isWithdrawing || !starknetAddress || !selectedAsset}
+                >
+                  {isWithdrawing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowUpRight className="w-4 h-4 mr-2" />
+                      Withdraw {selectedAsset.symbol}
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

@@ -9,6 +9,21 @@ import {
 import { Badge } from "@/components/ui/badge";
 import BottomNav from "@/components/BottomNav";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   QrCode,
   ArrowUpRight,
   ArrowDownLeft,
@@ -18,9 +33,16 @@ import {
   TrendingUp,
   Zap,
   Copy,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { usePortfolio } from "../contexts/PortfolioContext";
+import { getExistingWallet, getUserId, snKeys } from "../lib/session";
+import { useAutoSwap } from "../lib/useAutoSwap";
 
 const recentTransactions = [
   {
@@ -52,16 +74,158 @@ const recentTransactions = [
   },
 ];
 
-// Mock wallet address (in a real app, this would come from user context or API)
-const walletAddress = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
-
 export default function Home() {
   const [balanceVisible, setBalanceVisible] = useState(true);
+  const { totalBalance, loading, refreshBalances, assets } = usePortfolio();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Withdraw state
+  const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [withdrawAddress, setWithdrawAddress] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  
+  // Auto-swap state
+  const {
+    isSwapping: isAutoSwapping,
+    swapSuccess: autoSwapSuccess,
+    swapError: autoSwapError,
+    txHash: autoSwapTxHash,
+    executeAutoSwap,
+    resetSwapState: resetAutoSwapState,
+  } = useAutoSwap();
+  
+  // Get wallet address from session
+  const walletAddress = (() => {
+    try {
+      const userId = getUserId();
+      const existingWallet = getExistingWallet(userId);
+      return existingWallet ? existingWallet.address : null;
+    } catch {
+      return null;
+    }
+  })();
 
   const handleCopyAddress = () => {
-    navigator.clipboard.writeText(walletAddress);
-    // In a real app, you might show a toast notification here
-    console.log("Wallet address copied:", walletAddress);
+    if (walletAddress) {
+      navigator.clipboard.writeText(walletAddress);
+      // In a real app, you might show a toast notification here
+      console.log("Wallet address copied:", walletAddress);
+    }
+  };
+  
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshBalances();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!walletAddress) {
+      setWithdrawError("Wallet not connected");
+      return;
+    }
+
+    if (!withdrawAddress || !withdrawAmount) {
+      setWithdrawError("Please enter recipient address and amount");
+      return;
+    }
+
+    if (!selectedAsset) {
+      setWithdrawError("Please select an asset");
+      return;
+    }
+
+    setIsWithdrawing(true);
+    setWithdrawError("");
+    setWithdrawSuccess(false);
+
+    try {
+      // Get user's wallet data from localStorage
+      const userId = getUserId();
+      const walletKey = snKeys.wallet(userId);
+      const walletData = localStorage.getItem(walletKey);
+
+      if (!walletData) {
+        throw new Error("Wallet not found");
+      }
+
+      const parsedWalletData = JSON.parse(walletData);
+
+      // Create StarkNet account instance with the private key
+      const { Account, constants, ec, stark, RpcProvider, CallData } =
+        await import("starknet");
+
+      // Initialize the RPC provider for Starknet mainnet
+      const provider = new RpcProvider({
+        nodeUrl: "https://starknet-mainnet.public.blastapi.io",
+      });
+
+      // Create account instance
+      const account = new Account(
+        provider,
+        parsedWalletData.address,
+        parsedWalletData.privateKey,
+      );
+
+      // Prepare the transaction
+      const amountInWei = BigInt(
+        parseFloat(withdrawAmount) * Math.pow(10, selectedAsset.decimals),
+      ).toString();
+
+      // Transfer call data
+      const transferCall = {
+        contractAddress: selectedAsset.contractAddress,
+        entrypoint: "transfer",
+        calldata: CallData.compile({
+          recipient: withdrawAddress,
+          amount: [amountInWei, "0x0"], // low and high parts
+        }),
+      };
+
+      // Estimate fee
+      const { suggestedMaxFee } = await account.estimateInvokeFee([
+        transferCall,
+      ]);
+
+      // Execute the transaction
+      const result = await account.execute([transferCall], {
+        maxFee: suggestedMaxFee,
+      });
+
+      console.log("Transaction sent:", result);
+
+      // Wait for transaction to be accepted
+      await provider.waitForTransaction(result.transaction_hash, {
+        retryInterval: 1000,
+        successStates: ["ACCEPTED_ON_L1", "ACCEPTED_ON_L2"],
+        errorStates: ["REJECTED"],
+      });
+
+      // Successful withdrawal
+      setWithdrawSuccess(true);
+      setWithdrawAddress("");
+      setWithdrawAmount("");
+
+      // Reset success status after 5 seconds
+      setTimeout(() => setWithdrawSuccess(false), 5000);
+
+      // Refresh balances after successful withdrawal
+      await refreshBalances();
+    } catch (err: any) {
+      const errorMessage =
+        err instanceof Error ? err.message : `Failed to withdraw crypto`;
+      setWithdrawError(errorMessage);
+      console.error("Withdrawal error:", err);
+    } finally {
+      setIsWithdrawing(false);
+    }
   };
 
   return (
@@ -88,22 +252,35 @@ export default function Home() {
           <p className="text-sm opacity-90 mb-2">Total Portfolio Balance</p>
           <div className="flex items-center justify-center gap-2 mb-4">
             {balanceVisible ? (
-              <h2 className="text-3xl font-bold">₦2,045,000</h2>
+              <h2 className="text-3xl font-bold">
+                ₦{loading ? "Loading..." : totalBalance.toLocaleString()}
+              </h2>
             ) : (
               <h2 className="text-3xl font-bold">****</h2>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-white hover:bg-white/20 h-8 w-8"
-              onClick={() => setBalanceVisible(!balanceVisible)}
-            >
-              {balanceVisible ? (
-                <EyeOff className="w-4 h-4" />
-              ) : (
-                <Eye className="w-4 h-4" />
-              )}
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-white hover:bg-white/20 h-8 w-8"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-white hover:bg-white/20 h-8 w-8"
+                onClick={() => setBalanceVisible(!balanceVisible)}
+              >
+                {balanceVisible ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </Button>
+            </div>
           </div>
           <div className="flex items-center justify-center gap-1 text-sm opacity-90 mb-4">
             <TrendingUp className="w-4 h-4" />
@@ -112,13 +289,16 @@ export default function Home() {
           {/* Wallet Address Display */}
           <div className="flex items-center justify-center gap-2">
             <p className="text-sm opacity-90">
-              Wallet: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+              {walletAddress
+                ? `Wallet: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+                : "Wallet: Not connected"}
             </p>
             <Button
               variant="ghost"
               size="icon"
               className="text-white hover:bg-white/20 h-8 w-8"
               onClick={handleCopyAddress}
+              disabled={!walletAddress}
             >
               <Copy className="w-4 h-4" />
             </Button>
@@ -130,23 +310,83 @@ export default function Home() {
       <div className="px-6 -mt-8 lg:-mt-8 mt-5 mb-6">
         <Card className="shadow-lg">
           <CardContent className="p-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <Button asChild className="h-12 flex-col gap-1">
                 <Link to="/payments?tab=receive">
                   <QrCode className="w-5 h-5" />
                   <span className="text-sm">Receive</span>
                 </Link>
               </Button>
-              <Button variant="outline" asChild className="h-12 flex-col gap-1">
-                <Link to="/payments?tab=send">
-                  <ArrowUpRight className="w-5 h-5" />
-                  <span className="text-sm">Withdraw</span>
-                </Link>
+              <Button
+                variant="outline"
+                className="h-12 flex-col gap-1"
+                onClick={() => setShowWithdrawDialog(true)}
+              >
+                <ArrowUpRight className="w-5 h-5" />
+                <span className="text-sm">Withdraw</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-12 flex-col gap-1"
+                onClick={executeAutoSwap}
+                disabled={isAutoSwapping}
+              >
+                {isAutoSwapping ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    <span className="text-sm">Swapping...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                    <span className="text-sm">Auto Swap</span>
+                  </>
+                )}
               </Button>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Auto-swap Status */}
+      {autoSwapSuccess === true && autoSwapTxHash && (
+        <div className="px-6 mb-6">
+          <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+            <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+              <CheckCircle className="w-4 h-4" />
+              <span className="text-sm">
+                Successfully swapped STRK to USDC
+              </span>
+            </div>
+            <div className="mt-2">
+              <button
+                onClick={() =>
+                  window.open(
+                    `https://starkscan.co/tx/${autoSwapTxHash}`,
+                    "_blank",
+                  )
+                }
+                className="text-xs text-green-600 dark:text-green-400 underline"
+              >
+                View transaction
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {autoSwapSuccess === false && autoSwapError && (
+        <div className="px-6 mb-6">
+          <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
+            <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm">
+                Auto-swap failed: {autoSwapError}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notifications Panel */}
       <div className="px-6 mb-6">
@@ -237,6 +477,110 @@ export default function Home() {
       </div>
 
       <BottomNav />
+
+      {/* Withdraw Dialog */}
+      <Dialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowUpRight className="w-5 h-5" />
+              Withdraw Crypto
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {withdrawSuccess && (
+              <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-sm">
+                    Successfully withdrawn {withdrawAmount}{" "}
+                    {selectedAsset?.symbol || "crypto"}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {withdrawError && (
+              <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
+                <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="text-sm">{withdrawError}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="dialog-asset-select">Select Asset</Label>
+              <Select
+                value={selectedAsset?.id || ""}
+                onValueChange={(value) => {
+                  const asset = assets.find((a) => a.id === value);
+                  if (asset) setSelectedAsset(asset);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose an asset" />
+                </SelectTrigger>
+                <SelectContent>
+                  {assets.map((asset) => (
+                    <SelectItem key={asset.id} value={asset.id}>
+                      {asset.name} ({asset.amount} {asset.symbol})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedAsset && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-withdraw-address">
+                    Recipient Address
+                  </Label>
+                  <Input
+                    id="dialog-withdraw-address"
+                    placeholder="Enter recipient wallet address"
+                    value={withdrawAddress}
+                    onChange={(e) => setWithdrawAddress(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-withdraw-amount">Amount</Label>
+                  <Input
+                    id="dialog-withdraw-amount"
+                    type="number"
+                    placeholder="Enter amount to withdraw"
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Available: {selectedAsset.amount} {selectedAsset.symbol}
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleWithdraw}
+                  className="w-full"
+                  disabled={isWithdrawing || !walletAddress || !selectedAsset}
+                >
+                  {isWithdrawing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowUpRight className="w-4 h-4 mr-2" />
+                      Withdraw {selectedAsset.symbol}
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

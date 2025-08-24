@@ -33,8 +33,10 @@ import {
   AlertCircle,
   Wifi,
   WifiOff,
+  RefreshCw,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Account,
   constants,
@@ -45,7 +47,8 @@ import {
   CallData,
 } from "starknet";
 import { ethers } from "ethers";
-import { getUserId, generateStarknetAddress, snKeys } from "@/lib/session";
+import { getUserId, generateStarknetAddress, snKeys, getOrCreateWallet } from "@/lib/session";
+import { useAutoSwap } from "@/lib/useAutoSwap";
 
 // Mock BottomNav component
 const BottomNav = () => (
@@ -67,6 +70,7 @@ const cryptoOptions = [
 interface WalletResponse {
   address: string;
   publicKey: string;
+  privateKey: string;
   chainId: string;
   network: string;
 }
@@ -165,6 +169,28 @@ export default function Payments() {
   const [connectionStatus, setConnectionStatus] = useState<
     "checking" | "connected" | "disconnected"
   >("checking");
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
+  
+  // Send/Withdraw state
+  const [sendAddress, setSendAddress] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [sendSuccess, setSendSuccess] = useState(false);
+  const [sendError, setSendError] = useState("");
+  
+  // Tab handling
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "receive";
+
+  // Auto-swap functionality
+  const {
+    isSwapping,
+    swapSuccess,
+    swapError,
+    txHash,
+    executeAutoSwap,
+    resetSwapState,
+  } = useAutoSwap();
 
   const selectedCryptoData = cryptoOptions.find(
     (crypto) => crypto.value === selectedCrypto,
@@ -200,15 +226,15 @@ export default function Payments() {
   const getUserWalletAddress = async (): Promise<string> => {
     try {
       const userId = getUserId();
-      const storedAddress = localStorage.getItem(snKeys.address(userId));
       
-      if (storedAddress) {
-        return storedAddress;
-      }
+      // Use the existing getOrCreateWallet function which handles both generation and storage
+      const walletData = await getOrCreateWallet(userId);
       
-      // If no stored address, generate a new one
-      const walletData = await generateStarknetAddress();
-      localStorage.setItem(snKeys.address(userId), walletData.address);
+      console.log("🔑 Wallet Information:");
+      console.log("Address:", walletData.address);
+      console.log("Public Key:", walletData.publicKey);
+      console.log("PrivateKey:", walletData.privateKey);
+      
       return walletData.address;
     } catch (error) {
       console.error("Error getting user wallet address:", error);
@@ -234,11 +260,15 @@ export default function Payments() {
       const address = await getUserWalletAddress();
       setWalletAddress(address);
       setShowQRDialog(true);
+
+      // Auto-swap STRK to USDC if auto-convert is enabled
+      // Note: Auto-swap is now manually triggered by the user in the QR dialog
+      if (autoConvert && selectedCrypto === "strk") {
+        console.log("Auto-convert enabled for STRK payments");
+      }
     } catch (err) {
       const errorMessage =
-        err instanceof Error
-          ? err.message
-          : `Failed to get wallet address`;
+        err instanceof Error ? err.message : `Failed to get wallet address`;
       setError(errorMessage);
       console.error("Wallet address error:", err);
     } finally {
@@ -249,6 +279,9 @@ export default function Payments() {
   const copyAddress = async () => {
     try {
       await navigator.clipboard.writeText(walletAddress);
+      setCopyStatus("copied");
+      // Reset the copy status after 2 seconds
+      setTimeout(() => setCopyStatus("idle"), 2000);
     } catch (err) {
       console.error("Failed to copy address:", err);
     }
@@ -278,6 +311,63 @@ export default function Payments() {
     setShowQRDialog(false);
     setWalletAddress("");
     setError("");
+  };
+  
+  const switchTab = (tab: string) => {
+    setSearchParams({ tab });
+  };
+  
+  const sendCrypto = async () => {
+    if (!sendAddress || !sendAmount) {
+      setSendError("Please enter recipient address and amount");
+      return;
+    }
+    
+    if (!isConnected) {
+      setSendError("Wallet service is not available");
+      return;
+    }
+    
+    setIsSending(true);
+    setSendError("");
+    setSendSuccess(false);
+    
+    try {
+      // Get user's wallet data
+      const userId = getUserId();
+      const walletData = await getOrCreateWallet(userId);
+      
+      // In a real implementation, we would:
+      // 1. Create a StarkNet account instance with the private key
+      // 2. Prepare the transaction
+      // 3. Sign and send the transaction
+      // 4. Handle the response
+      
+      // For now, we'll simulate the sending process
+      console.log("Sending crypto...");
+      console.log("From:", walletData.address);
+      console.log("To:", sendAddress);
+      console.log("Amount:", sendAmount);
+      console.log("Crypto:", selectedCrypto);
+      
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Simulate successful send
+      setSendSuccess(true);
+      setSendAddress("");
+      setSendAmount("");
+      
+      // Reset success status after 5 seconds
+      setTimeout(() => setSendSuccess(false), 5000);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : `Failed to send crypto`;
+      setSendError(errorMessage);
+      console.error("Send error:", err);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -397,7 +487,7 @@ export default function Payments() {
                     <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
                       <CheckCircle className="w-4 h-4" />
                       <span className="text-sm font-medium">
-                        Bank Account: GTBank ****1234
+                        Auto-convert enabled: STRK → USDC → Bank
                       </span>
                     </div>
                   </div>
@@ -474,7 +564,7 @@ export default function Payments() {
                   className="flex-1"
                 >
                   <Copy className="w-4 h-4 mr-2" />
-                  Copy
+                  {copyStatus === "copied" ? "Copied!" : "Copy"}
                 </Button>
                 <Button
                   variant="outline"
@@ -488,13 +578,92 @@ export default function Payments() {
             </div>
 
             {autoConvert && (
-              <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
-                <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                  <CheckCircle className="w-4 h-4" />
-                  <span className="text-sm">
-                    Auto-convert enabled to GTBank ****1234
-                  </span>
+              <div className="space-y-3">
+                <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                  <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                    <CheckCircle className="w-4 h-4" />
+                    <span className="text-sm">
+                      Auto-convert enabled to GTBank ****1234
+                    </span>
+                  </div>
                 </div>
+
+                {/* Manual Auto-swap Trigger */}
+                {selectedCrypto === "strk" && swapSuccess === null && (
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      onClick={executeAutoSwap}
+                      disabled={isSwapping}
+                      className="w-full"
+                    >
+                      {isSwapping ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Swapping STRK to USDC...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Auto-swap STRK to USDC
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-xs text-muted-foreground text-center">
+                      Convert your STRK to USDC for automatic bank transfer
+                    </p>
+                  </div>
+                )}
+
+                {/* Auto-swap status */}
+                {selectedCrypto === "strk" && (
+                  <>
+                    {isSwapping && swapSuccess === null && (
+                      <div className="p-3 bg-yellow-50 dark:bg-yellow-950 rounded-lg">
+                        <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span className="text-sm">
+                            Auto-swapping STRK to USDC...
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {swapSuccess === true && txHash && (
+                      <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                        <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                          <CheckCircle className="w-4 h-4" />
+                          <span className="text-sm">
+                            STRK successfully swapped to USDC
+                          </span>
+                        </div>
+                        <div className="mt-2">
+                          <button
+                            onClick={() =>
+                              window.open(
+                                `https://starkscan.co/tx/${txHash}`,
+                                "_blank",
+                              )
+                            }
+                            className="text-xs text-green-600 dark:text-green-400 underline"
+                          >
+                            View transaction
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {swapSuccess === false && swapError && (
+                      <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
+                        <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                          <AlertCircle className="w-4 h-4" />
+                          <span className="text-sm">
+                            Auto-swap failed: {swapError}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </div>
