@@ -31,7 +31,7 @@
     "express": "^5.1.0",
     "get-starknet": "^4.0.0",
     "qrcode": "^1.5.4",
-    "starknet": "^7.6.4",
+    "starknet": "^8.0.0",
     "starknetkit": "^3.0.3",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",

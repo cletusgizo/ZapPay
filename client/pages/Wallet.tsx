@@ -52,12 +52,12 @@ import {
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { RpcProvider, CallData, num } from "starknet";
-import { getUserId, snKeys, getExistingWallet } from "../lib/session";
+import { getUserId, snKeys, getExistingWallet, deployStarknetAccount } from "../lib/session";
 import { usePortfolio } from "../contexts/PortfolioContext";
 import { useAutoSwap } from "../lib/useAutoSwap";
 
 // ✅ Fixed: No extra spaces
-const STARKNET_MAINNET_RPC = "https://starknet-mainnet.public.blastapi.io/";
+const STARKNET_MAINNET_RPC = "https://starknet-mainnet.public.blastapi.io";
 const provider = new RpcProvider({ nodeUrl: STARKNET_MAINNET_RPC });
 
 // Token contracts
@@ -232,24 +232,43 @@ const AssetCard = ({
   </div>
 );
 
-// ERC20 balance reader
+// ERC20 balance reader with fallback RPC providers
 async function getErc20Balance(
   contractAddress: string,
   owner: string,
 ): Promise<bigint> {
-  try {
-    const res = await provider.callContract({
-      contractAddress,
-      entrypoint: "balanceOf",
-      calldata: CallData.compile({ user: owner }),
-    });
-    const low = num.toBigInt(res[0]);
-    const high = num.toBigInt(res[1]);
-    return high * BigInt(2) ** BigInt(128) + low;
-  } catch (error) {
-    console.error(`Error fetching balance for ${contractAddress}:`, error);
-    throw error;
+  // Try different RPC providers to handle network issues
+  const rpcProviders = [
+    "https://starknet-mainnet.public.blastapi.io",
+    "https://rpc.starknet.lava.build",
+    "https://starknet-mainnet.s.chainbase.online/v1/0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  ];
+
+  let lastError;
+
+  // Try each provider until one works
+  for (const rpcUrl of rpcProviders) {
+    try {
+      const { RpcProvider, CallData, num } = await import("starknet");
+      const tempProvider = new RpcProvider({ nodeUrl: rpcUrl });
+      
+      const res = await tempProvider.callContract({
+        contractAddress,
+        entrypoint: "balanceOf",
+        calldata: CallData.compile({ user: owner }),
+      });
+      const low = num.toBigInt(res[0]);
+      const high = num.toBigInt(res[1]);
+      return high * BigInt(2) ** BigInt(128) + low;
+    } catch (error) {
+      console.log(`Failed to fetch balance from RPC provider ${rpcUrl}:`, error);
+      lastError = error;
+    }
   }
+
+  // If all providers failed, throw the last error
+  console.error(`Error fetching balance for ${contractAddress}:`, lastError);
+  throw lastError || new Error(`Failed to fetch balance for ${contractAddress} from all RPC providers`);
 }
 
 // ETH balance
@@ -259,25 +278,46 @@ async function getEthBalance(address: string): Promise<bigint> {
     return BigInt(balance.toString());
   } catch (error) {
     console.error("Error fetching ETH balance:", error);
-    throw error;
+    // Return 0 balance instead of throwing error to prevent UI from breaking
+    return BigInt(0);
   }
 }
 
-// Check if StarkNet account exists
+// Check if StarkNet account exists with fallback RPC providers
 async function checkAccountExists(address: string): Promise<boolean> {
-  try {
-    // Try to get the class hash of the contract at the address
-    // This will fail if the contract doesn't exist
-    await provider.getClassHashAt(address);
-    return true;
-  } catch (error: any) {
-    // If we get a "Contract not found" error, the account doesn't exist
-    if (error.message && error.message.includes("Contract not found")) {
-      return false;
+  // Try different RPC providers to handle network issues
+  const rpcProviders = [
+    "https://starknet-mainnet.public.blastapi.io",
+    "https://rpc.starknet.lava.build",
+    "https://starknet-mainnet.s.chainbase.online/v1/0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  ];
+
+  let lastError;
+
+  // Try each provider until one works
+  for (const rpcUrl of rpcProviders) {
+    try {
+      const { RpcProvider } = await import("starknet");
+      const tempProvider = new RpcProvider({ nodeUrl: rpcUrl });
+      
+      // Try to get the class hash of the contract at the address
+      // This will fail if the contract doesn't exist
+      await tempProvider.getClassHashAt(address);
+      return true;
+    } catch (error: any) {
+      console.log(`Failed to check account existence from RPC provider ${rpcUrl}:`, error);
+      lastError = error;
+      
+      // If we get a "Contract not found" error, the account doesn't exist
+      if (error.message && error.message.includes("Contract not found")) {
+        return false;
+      }
     }
-    // For other errors, we re-throw them as they might be network issues
-    throw error;
   }
+
+  // If all providers failed with network errors, assume account doesn't exist
+  console.error("Error checking account existence:", lastError);
+  return false;
 }
 
 // Get wallet address from payment page or create new one
@@ -430,96 +470,123 @@ export default function Wallet() {
     try {
       // Check if the account exists on StarkNet
       const accountExists = await checkAccountExists(starknetAddress);
+      let accountDeployed = accountExists;
+      
       if (!accountExists) {
-        throw new Error("Wallet account not deployed on StarkNet. To deploy your account, you need to send a transaction that deploys the account contract. This typically happens when you make your first transaction. Please use a StarkNet wallet like Argent or Braavos to send a small amount of ETH or STRK to this address to deploy the account contract, then try again.");
-      }
+        // Get user's wallet data from localStorage
+        const userId = getUserId();
+        const walletKey = snKeys.wallet(userId);
+        const walletData = localStorage.getItem(walletKey);
 
-      // Get user's wallet data from localStorage
-      const userId = getUserId();
-      const walletKey = snKeys.wallet(userId);
-      const walletData = localStorage.getItem(walletKey);
-
-      if (!walletData) {
-        throw new Error("Wallet not found");
-      }
-
-      const parsedWalletData = JSON.parse(walletData);
-
-      // Create StarkNet account instance with the private key
-      const { Account, constants, ec, stark, RpcProvider, CallData } =
-        await import("starknet");
-
-      // Initialize the RPC provider for Starknet mainnet
-      const provider = new RpcProvider({
-        nodeUrl: "https://starknet-mainnet.public.blastapi.io",
-      });
-
-      // Create account instance
-      const account = new Account(
-        provider,
-        parsedWalletData.address,
-        parsedWalletData.privateKey,
-      );
-
-      // Prepare the transaction
-      const amountInWei = BigInt(
-        parseFloat(withdrawAmount) * Math.pow(10, asset.decimals),
-      ).toString();
-
-      // Transfer call data
-      const transferCall = {
-        contractAddress: asset.contractAddress,
-        entrypoint: "transfer",
-        calldata: CallData.compile({
-          recipient: withdrawAddress,
-          amount: [amountInWei, "0x0"], // low and high parts
-        }),
-      };
-
-      // Estimate fee
-      let suggestedMaxFee;
-      try {
-        const feeEstimate = await account.estimateInvokeFee([
-          transferCall,
-        ]);
-        suggestedMaxFee = feeEstimate.suggestedMaxFee;
-      } catch (feeError: any) {
-        // Check if this is a contract not found error during fee estimation
-        if (feeError.message && feeError.message.includes("Contract not found")) {
-          throw new Error("Wallet account not deployed on StarkNet. To deploy your account, you need to send a transaction that deploys the account contract. This typically happens when you make your first transaction. Please use a StarkNet wallet like Argent or Braavos to send a small amount of ETH or STRK to this address to deploy the account contract, then try again.");
+        if (!walletData) {
+          throw new Error("Wallet not found");
         }
-        // Re-throw other errors
-        throw feeError;
+
+        const parsedWalletData = JSON.parse(walletData);
+
+        // Deploy the account contract
+        setWithdrawError("Deploying account contract...");
+        const deploymentTxHash = await deployStarknetAccount(parsedWalletData);
+        console.log("Account deployed with transaction hash:", deploymentTxHash);
+        accountDeployed = true;
       }
 
-      // Execute the transaction
-      const result = await account.execute([transferCall], {
-        maxFee: suggestedMaxFee,
-      });
+      // Only proceed with withdrawal if account is deployed
+      if (accountDeployed) {
+        // Get user's wallet data from localStorage
+        const userId = getUserId();
+        const walletKey = snKeys.wallet(userId);
+        const walletData = localStorage.getItem(walletKey);
 
-      console.log("Transaction sent:", result);
+        if (!walletData) {
+          throw new Error("Wallet not found");
+        }
 
-      // Wait for transaction to be accepted
-      await provider.waitForTransaction(result.transaction_hash, {
-        retryInterval: 1000,
-        successStates: ["ACCEPTED_ON_L1", "ACCEPTED_ON_L2"],
-        errorStates: ["REJECTED"],
-      });
+        const parsedWalletData = JSON.parse(walletData);
 
-      // Successful withdrawal
-      setWithdrawSuccess(true);
-      setWithdrawAddress("");
-      setWithdrawAmount("");
+        // Create StarkNet account instance with the private key
+        const { Account, constants, ec, stark, RpcProvider, CallData } =
+          await import("starknet");
 
-      // Reset success status after 5 seconds
-      setTimeout(() => setWithdrawSuccess(false), 5000);
+        // Initialize the RPC provider for Starknet mainnet
+        const provider = new RpcProvider({
+          nodeUrl: "https://starknet-mainnet.public.blastapi.io",
+        });
 
-      // Refresh balances after successful withdrawal
-      await refreshBalances();
+        // Create account instance
+        const account = new Account({
+          provider,
+          address: parsedWalletData.address,
+          signer: parsedWalletData.privateKey,
+        });
+
+        // Prepare the transaction
+        const amountInWei = BigInt(
+          parseFloat(withdrawAmount) * Math.pow(10, asset.decimals),
+        ).toString();
+
+        // Transfer call data
+        const transferCall = {
+          contractAddress: asset.contractAddress,
+          entrypoint: "transfer",
+          calldata: CallData.compile({
+            recipient: withdrawAddress,
+            amount: [amountInWei, "0x0"], // low and high parts
+          }),
+        };
+
+        // Estimate fee
+        let suggestedMaxFee;
+        try {
+          const feeEstimate = await account.estimateInvokeFee([
+            transferCall,
+          ]);
+          // Use overall_fee with a multiplier for safety
+          suggestedMaxFee = (BigInt(feeEstimate.overall_fee) * 12n) / 10n; // 20% extra for safety
+        } catch (feeError: any) {
+          // Check if this is a contract not found error during fee estimation
+          if (feeError.message && feeError.message.includes("Contract not found")) {
+            throw new Error("Wallet account not deployed on StarkNet. To deploy your account, you need to send a transaction that deploys the account contract. This typically happens when you make your first transaction. Please use a StarkNet wallet like Argent or Braavos to send a small amount of ETH or STRK to this address to deploy the account contract, then try again.");
+          }
+          // Re-throw other errors
+          throw feeError;
+        }
+
+        // Execute the transaction
+        // Execute the transaction with compatible options
+        const result = await account.execute([transferCall]);
+
+        console.log("Transaction sent:", result);
+
+        // Wait for transaction to be accepted
+        await provider.waitForTransaction(result.transaction_hash, {
+          retryInterval: 1000,
+          successStates: ["ACCEPTED_ON_L1", "ACCEPTED_ON_L2"],
+        });
+
+        // Successful withdrawal
+        setWithdrawSuccess(true);
+        setWithdrawAddress("");
+        setWithdrawAmount("");
+
+        // Reset success status after 5 seconds
+        setTimeout(() => setWithdrawSuccess(false), 5000);
+
+        // Refresh balances after successful withdrawal
+        await refreshBalances();
+      }
     } catch (err: any) {
       const errorMessage =
         err instanceof Error ? err.message : `Failed to withdraw crypto`;
-      setWithdrawError(errorMessage);
+      
+      // Provide a more helpful error message for version compatibility issues
+      if (errorMessage.includes("specification version is not supported") ||
+          errorMessage.includes("unexpected field: \"l1_data_gas\"")) {
+        setWithdrawError("The StarkNet network is currently experiencing version compatibility issues. Please try again later or use an external wallet like Argent or Braavos to deploy your account by sending a small amount of ETH or STRK to your address, then try again.");
+      } else {
+        setWithdrawError(errorMessage);
+      }
+      
       console.error("Withdrawal error:", err);
     } finally {
       setIsWithdrawing(false);
@@ -544,8 +611,39 @@ export default function Wallet() {
   useEffect(() => {
     const initializeWallet = async () => {
       try {
-        await provider.getChainId();
-        setConnectionStatus("connected");
+        // Try different RPC providers to handle network issues
+        const rpcProviders = [
+          "https://starknet-mainnet.public.blastapi.io",
+          "https://rpc.starknet.lava.build",
+          "https://starknet-mainnet.s.chainbase.online/v1/0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        ];
+
+        let providerInitialized = false;
+        let lastError;
+
+        // Try each provider until one works
+        for (const rpcUrl of rpcProviders) {
+          try {
+            const { RpcProvider } = await import("starknet");
+            const tempProvider = new RpcProvider({ nodeUrl: rpcUrl });
+            
+            // Test the provider
+            await tempProvider.getChainId();
+            console.log(`Successfully connected to RPC provider: ${rpcUrl}`);
+            providerInitialized = true;
+            break;
+          } catch (error) {
+            console.log(`Failed to connect to RPC provider ${rpcUrl}:`, error);
+            lastError = error;
+          }
+        }
+
+        if (providerInitialized) {
+          setConnectionStatus("connected");
+        } else {
+          console.error("Failed to initialize any RPC provider:", lastError);
+          setConnectionStatus("disconnected");
+        }
 
         // Automatically sync wallet address from payment page
         const address = await syncWalletFromPayment();
@@ -554,7 +652,7 @@ export default function Wallet() {
           await refreshBalances();
         } else {
           console.log("No wallet address found from payment page");
-          setConnectionStatus("disconnected");
+          // Don't set connection status to disconnected here as it's already set above
         }
       } catch (error) {
         console.error("Wallet init failed:", error);

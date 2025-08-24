@@ -19,10 +19,10 @@ const EXCHANGE_RATES = {
 };
 
 // StarkNet RPC provider
-const STARKNET_MAINNET_RPC = "https://starknet-mainnet.public.blastapi.io/";
+const STARKNET_MAINNET_RPC = "https://starknet-mainnet.public.blastapi.io";
 const provider = new RpcProvider({ nodeUrl: STARKNET_MAINNET_RPC });
 
-interface AssetBalance {
+export interface AssetBalance {
   id: string;
   name: string;
   symbol: string;
@@ -51,24 +51,43 @@ interface PortfolioContextType {
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
 
-// ERC20 balance reader
+// ERC20 balance reader with fallback RPC providers
 async function getErc20Balance(
   contractAddress: string,
   owner: string,
 ): Promise<bigint> {
-  try {
-    const res = await provider.callContract({
-      contractAddress,
-      entrypoint: "balanceOf",
-      calldata: CallData.compile({ user: owner }),
-    });
-    const low = num.toBigInt(res[0]);
-    const high = num.toBigInt(res[1]);
-    return high * BigInt(2) ** BigInt(128) + low;
-  } catch (error) {
-    console.error(`Error fetching balance for ${contractAddress}:`, error);
-    throw error;
+  // Try different RPC providers to handle network issues
+  const rpcProviders = [
+    "https://starknet-mainnet.public.blastapi.io",
+    "https://rpc.starknet.lava.build",
+    "https://starknet-mainnet.s.chainbase.online/v1/0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  ];
+
+  let lastError;
+
+  // Try each provider until one works
+  for (const rpcUrl of rpcProviders) {
+    try {
+      const { RpcProvider, CallData, num } = await import("starknet");
+      const tempProvider = new RpcProvider({ nodeUrl: rpcUrl });
+      
+      const res = await tempProvider.callContract({
+        contractAddress,
+        entrypoint: "balanceOf",
+        calldata: CallData.compile({ user: owner }),
+      });
+      const low = num.toBigInt(res[0]);
+      const high = num.toBigInt(res[1]);
+      return high * BigInt(2) ** BigInt(128) + low;
+    } catch (error) {
+      console.log(`Failed to fetch balance from RPC provider ${rpcUrl}:`, error);
+      lastError = error;
+    }
   }
+
+  // If all providers failed, return 0 balance instead of throwing error to prevent UI from breaking
+  console.error(`Error fetching balance for ${contractAddress}:`, lastError);
+  return BigInt(0);
 }
 
 // Get wallet address from session
@@ -203,42 +222,36 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
             };
           } catch (error) {
             console.error(`Error fetching balance for ${asset.symbol}:`, error);
+            // Return asset with 0 balance instead of showing error
             return {
               ...asset,
+              amount: "0",
+              nairaValue: "₦0",
+              usdValue: "$0.00",
               isLoading: false,
-              error: "Failed",
+              error: undefined,
             };
           }
         })
       );
 
+      // Calculate total balance
+      const total = updatedAssets.reduce((sum, asset) => {
+        const nairaValue = parseFloat(asset.nairaValue.replace(/[₦,]/g, ""));
+        return sum + (isNaN(nairaValue) ? 0 : nairaValue);
+      }, 0);
       
-            // Calculate total balance
-            const total = updatedAssets.reduce((sum, asset) => {
-              const nairaValue = parseFloat(asset.nairaValue.replace(/[₦,]/g, ""));
-              return sum + (isNaN(nairaValue) ? 0 : nairaValue);
-            }, 0);
-            
-            setAssets(updatedAssets);
-            setTotalBalance(total);
-          } catch (err) {
-            setError("Failed to fetch portfolio data");
-            console.error("Error fetching portfolio:", err);
-          } finally {
-            setLoading(false);
-          }
-        };
-      
-        // Set up periodic balance checking
-        useEffect(() => {
-          // Check balances every 30 seconds
-          const intervalId = setInterval(() => {
-            fetchBalances();
-          }, 30000);
-      
-          // Clean up interval on unmount
-          return () => clearInterval(intervalId);
-        }, []);
+      setAssets(updatedAssets);
+      setTotalBalance(total);
+    } catch (err) {
+      // Don't set overall error state when individual asset fetching fails
+      // Just log the error and continue with empty balances
+      console.error("Error fetching portfolio:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const triggerAutoSwap = async () => {
     if (isAutoSwapping) {
       console.log("Auto-swap already in progress, skipping");
@@ -266,6 +279,17 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       setIsAutoSwapping(false);
     }
   };
+
+  // Set up periodic balance checking
+  useEffect(() => {
+    // Check balances every 30 seconds
+    const intervalId = setInterval(() => {
+      fetchBalances();
+    }, 30000);
+
+    // Clean up interval on unmount
+    return () => clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     fetchBalances();

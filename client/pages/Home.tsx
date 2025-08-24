@@ -78,16 +78,16 @@ export default function Home() {
   const [balanceVisible, setBalanceVisible] = useState(true);
   const { totalBalance, loading, refreshBalances, assets } = usePortfolio();
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
   // Withdraw state
   const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
-  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [selectedAsset, setSelectedAsset] = useState<any>(null);
   const [withdrawAddress, setWithdrawAddress] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [withdrawSuccess, setWithdrawSuccess] = useState(false);
   const [withdrawError, setWithdrawError] = useState("");
-  
+
   // Auto-swap state
   const {
     isSwapping: isAutoSwapping,
@@ -97,7 +97,7 @@ export default function Home() {
     executeAutoSwap,
     resetSwapState: resetAutoSwapState,
   } = useAutoSwap();
-  
+
   // Get wallet address from session
   const walletAddress = (() => {
     try {
@@ -116,7 +116,7 @@ export default function Home() {
       console.log("Wallet address copied:", walletAddress);
     }
   };
-  
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
@@ -159,8 +159,7 @@ export default function Home() {
       const parsedWalletData = JSON.parse(walletData);
 
       // Create StarkNet account instance with the private key
-      const { Account, constants, ec, stark, RpcProvider, CallData } =
-        await import("starknet");
+      const { Account, RpcProvider, CallData } = await import("starknet");
 
       // Initialize the RPC provider for Starknet mainnet
       const provider = new RpcProvider({
@@ -168,11 +167,11 @@ export default function Home() {
       });
 
       // Create account instance
-      const account = new Account(
+      const account = new Account({
         provider,
-        parsedWalletData.address,
-        parsedWalletData.privateKey,
-      );
+        address: parsedWalletData.address,
+        signer: parsedWalletData.privateKey,
+      });
 
       // Prepare the transaction
       const amountInWei = BigInt(
@@ -190,22 +189,17 @@ export default function Home() {
       };
 
       // Estimate fee
-      const { suggestedMaxFee } = await account.estimateInvokeFee([
-        transferCall,
-      ]);
+      const feeEstimate = await account.estimateInvokeFee([transferCall]);
+      const suggestedMaxFee = feeEstimate.overall_fee;
 
       // Execute the transaction
-      const result = await account.execute([transferCall], {
-        maxFee: suggestedMaxFee,
-      });
+      const result = await account.execute([transferCall]);
 
       console.log("Transaction sent:", result);
 
       // Wait for transaction to be accepted
       await provider.waitForTransaction(result.transaction_hash, {
         retryInterval: 1000,
-        successStates: ["ACCEPTED_ON_L1", "ACCEPTED_ON_L2"],
-        errorStates: ["REJECTED"],
       });
 
       // Successful withdrawal
@@ -266,7 +260,9 @@ export default function Home() {
                 onClick={handleRefresh}
                 disabled={isRefreshing}
               >
-                <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
+                />
               </Button>
               <Button
                 variant="ghost"
@@ -354,9 +350,7 @@ export default function Home() {
           <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
             <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
               <CheckCircle className="w-4 h-4" />
-              <span className="text-sm">
-                Successfully swapped STRK to USDC
-              </span>
+              <span className="text-sm">Successfully swapped STRK to USDC</span>
             </div>
             <div className="mt-2">
               <button
@@ -380,9 +374,7 @@ export default function Home() {
           <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg">
             <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
               <AlertCircle className="w-4 h-4" />
-              <span className="text-sm">
-                Auto-swap failed: {autoSwapError}
-              </span>
+              <span className="text-sm">Auto-swap failed: {autoSwapError}</span>
             </div>
           </div>
         </div>
